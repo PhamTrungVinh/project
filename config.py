@@ -10,6 +10,7 @@ load_dotenv()
 GROQ_API_KEY = os.environ["GROQ_API"]
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
+JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]
 
 PDF_PATH = "/home/vinh/vinh/test_ai/unit3/project/FSoft_HR.pdf"
 FAISS_INDEX_PATH = "faiss_index"
