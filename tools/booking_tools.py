@@ -1,187 +1,99 @@
-from typing import Annotated, Optional
-from langchain.tools import tool
-from langgraph.prebuilt import InjectedState
+from typing import Optional
+from langchain_core.tools import tool
 
-from state import AgentState
-import db
-from logger import db_logger
-from memory import save_episode
-
-VALID_BOOKING_STATUSES = ["Scheduled", "Canceled", "Finished"]
-
-
-@tool
-def book_room(
-    reason: str,
-    time: str,
-    state: Annotated[AgentState, InjectedState],
-    customer_name: Optional[str] = None,
-    customer_phone: Optional[str] = None,
-    note: Optional[str] = None,
-    email: Optional[str] = None,
-) -> str:
-    """Book a meeting room.
-    Required: reason (reason for booking), time (booking time).
-    Optional: customer_name, customer_phone, note, email.
-    If email is not given, it is automatically injected from conversation context.
-    New bookings always start with status 'Scheduled'.
-    Returns the new booking_id."""
-    email = email or state.get("user_email")
-    user_id = state.get("user_name", "unknown")
-    thread_id = state.get("thread_id", "unknown")
-
-    booking_id = db.new_id("BKG")
-    conn = db.get_conn()
-    conn.execute(
-        "INSERT INTO bookings (booking_id, customer_name, customer_phone, email, "
-        "reason, time, note, status, user_id) VALUES (?,?,?,?,?,?,?,?,?)",
-        (booking_id, customer_name, customer_phone, email, reason, time, note,
-         "Scheduled", user_id),
-    )
-    conn.commit()
-    conn.close()
-    db_logger.info(f"Booked room booking_id={booking_id}, reason={reason}, time={time}")
-
-    save_episode(
-        user_id=user_id,
-        conversation_id=thread_id,
-        summary=f"User booked room: {booking_id} at {time}, reason: {reason}",
-        outcome=f"booking_id={booking_id}, status=Scheduled",
-    )
-
-    return f"Booked, booking_id: {booking_id}, Status: Scheduled."
+from database import get_db_session
+from crud import bookings as booking_crud
+from schemas.booking import BookingCreate, BookingUpdate
+from utils.exceptions import NotFoundException, ConflictException
+from services.memory_service import remember_episode
+from logger import agent_logger
 
 
-@tool
-def track_booking(
-    booking_id: str,
-    state: Annotated[AgentState, InjectedState],
-) -> str:
-    """Track a room booking by booking_id. Returns full booking info."""
-    user_id = state.get("user_name", "unknown")
-    conn = db.get_conn()
-    row = conn.execute("SELECT * FROM bookings WHERE booking_id=?", (booking_id,)).fetchone()
-    conn.close()
+def build_booking_tools(owner_id: int, thread_id: str) -> list:
+    @tool
+    def book_room(
+        reason: str,
+        time: str,
+        customer_name: Optional[str] = None,
+        customer_phone: Optional[str] = None,
+        note: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> str:
+        """Book a meeting room. Required: reason, time (ABSOLUTE ISO datetime,
+        e.g. '2026-08-25 14:00:00' - convert relative expressions like 'tomorrow'
+        using the current date/time given in the system prompt before calling this).
+        New bookings always start with status 'Scheduled'."""
+        with get_db_session() as db:
+            try:
+                data = BookingCreate(
+                    reason=reason, time=time, note=note,
+                    customer_name=customer_name, customer_phone=customer_phone, email=email,
+                )
+            except Exception:
+                return f"Could not parse time value: {time!r}. Please provide an absolute date/time."
 
-    if not row:
-        return f"Can't find booking with ID {booking_id}."
+            booking = booking_crud.create_booking(db, owner_id, data)
+            remember_episode(db, owner_id, thread_id, f"Booked room: {reason}",
+                              f"booking_code={booking.booking_code}, status=Scheduled")
+        agent_logger.info(f"BOOKING_TOOL create booking_code={booking.booking_code} owner_id={owner_id}")
+        return f"Booked room, booking_code: {booking.booking_code}, status: Scheduled."
 
-    d = dict(row)
-    if d.get("user_id") != user_id:
-        db_logger.warning(f"ACCESS_DENIED booking_id={booking_id} requested_by={user_id!r}")
-        return f"Can't find booking with ID {booking_id}."
-    
-    return "\n".join(f"{k}: {v}" for k, v in d.items())
-
-
-@tool
-def update_booking(
-    booking_id: str,
-    state: Annotated[AgentState, InjectedState],
-    reason: Optional[str] = None,
-    time: Optional[str] = None,
-    customer_name: Optional[str] = None,
-    customer_phone: Optional[str] = None,
-    note: Optional[str] = None,
-    email: Optional[str] = None,
-) -> str:
-    """Update an existing room booking. Only provided fields are changed.
-    Email is auto-injected from context if not provided directly, but can be overridden."""
-
-    user_id = state.get("user_name", "unknown")
-    thread_id = state.get("thread_id", "unknown")
-    
-    conn = db.get_conn()
-    row = conn.execute("SELECT * FROM bookings WHERE booking_id=?", (booking_id,)).fetchone()
-    if not row:
-        conn.close()
-        return f"Can't find booking with ID {booking_id}."
-
-    current = dict(row)
-    if current.get("user_id") != user_id:
-        db_logger.warning(f"ACCESS_DENIED booking_id={booking_id} requested_by={user_id!r}")
-        return f"Can't find booking with ID {booking_id}."
-    
-    if current["status"] == "Scheduled":
-        conn.close()
-        save_episode(
-            user_id=user_id,
-            conversation_id=thread_id,
-            summary=f"Tried to update booking {booking_id}",
-            outcome="FAILED - booking already Scheduled",
+    @tool
+    def track_booking(booking_code: str) -> str:
+        """Track a room booking by booking_code. Returns full booking info."""
+        with get_db_session() as db:
+            try:
+                booking = booking_crud.get_booking_by_code(db, owner_id, booking_code)
+            except NotFoundException:
+                return f"Booking not found with code {booking_code}."
+        return (
+            f"booking_code: {booking.booking_code}\nreason: {booking.reason}\n"
+            f"time: {booking.time}\nstatus: {booking.status.value}\n"
+            f"customer_name: {booking.customer_name}\nnote: {booking.note}"
         )
-        return f"Cannot update booking {booking_id} because it is already scheduled."
 
-    resolved_email = email if email is not None else state.get("user_email")
+    @tool
+    def update_booking(
+        booking_code: str,
+        reason: Optional[str] = None,
+        time: Optional[str] = None,
+        customer_name: Optional[str] = None,
+        customer_phone: Optional[str] = None,
+        note: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> str:
+        """Update an existing booking. Only provided fields are changed."""
+        with get_db_session() as db:
+            try:
+                data = BookingUpdate(
+                    reason=reason, time=time, note=note,
+                    customer_name=customer_name, customer_phone=customer_phone, email=email,
+                )
+            except Exception:
+                return f"Could not parse time value: {time!r}."
 
-    updates = {}
-    for field, value in [
-        ("reason", reason), ("time", time),
-        ("customer_name", customer_name), ("customer_phone", customer_phone),
-        ("note", note),
-        ("email", email if email is not None else (resolved_email if current["email"] is None else None)),
-    ]:
-        if value is not None:
-            updates[field] = value
+            try:
+                booking_crud.update_booking(db, owner_id, booking_code, data)
+            except NotFoundException:
+                return f"Booking not found with code {booking_code}."
+            except ConflictException as e:
+                remember_episode(db, owner_id, thread_id, f"Tried to update booking {booking_code}", f"FAILED - {e.message}")
+                return e.message
+            remember_episode(db, owner_id, thread_id, f"Updated booking {booking_code}", "success")
+        return f"Updated booking {booking_code}."
 
-    if not updates:
-        conn.close()
-        return "No fields provided for update."
+    @tool
+    def cancel_booking(booking_code: str) -> str:
+        """Cancel a room booking by booking_code."""
+        with get_db_session() as db:
+            try:
+                booking_crud.cancel_booking(db, owner_id, booking_code)
+            except NotFoundException:
+                return f"Booking not found with code {booking_code}."
+            except ConflictException as e:
+                remember_episode(db, owner_id, thread_id, f"Tried to cancel booking {booking_code}", f"FAILED - {e.message}")
+                return e.message
+            remember_episode(db, owner_id, thread_id, f"Canceled booking {booking_code}", "success")
+        return f"Canceled booking {booking_code}."
 
-    set_clause = ", ".join(f"{k}=?" for k in updates)
-    conn.execute(f"UPDATE bookings SET {set_clause} WHERE booking_id=?", (*updates.values(), booking_id))
-    conn.commit()
-    conn.close()
-    db_logger.info(f"Updated room booking_id={booking_id}, reason={reason}, time={time}")
-
-    save_episode(
-        user_id=user_id,
-        conversation_id=thread_id,
-        summary=f"User updated booking {booking_id}, fields changed: {list(updates.keys())}",
-        outcome="success",
-    )
-
-    return f"Updated booking {booking_id}: {', '.join(updates.keys())}."
-
-
-@tool
-def cancel_booking(booking_id: str, state: Annotated[AgentState, InjectedState]) -> str:
-    """Cancel a room booking by booking_id.
-    Can only cancel bookings that are not already 'Scheduled'."""
-    user_id = state.get("user_name", "unknown")
-    thread_id = state.get("thread_id", "unknown")
-
-    conn = db.get_conn()
-    row = conn.execute("SELECT * FROM bookings WHERE booking_id=?", (booking_id,)).fetchone()
-    if not row:
-        conn.close()
-        return f"Can't find booking with ID {booking_id}."
-
-    current = dict(row)
-    if current.get("user_id") != user_id:
-        db_logger.warning(f"ACCESS_DENIED booking_id={booking_id} requested_by={user_id!r}")
-        return f"Can't find booking with ID {booking_id}."
-    
-    if current["status"] == "Scheduled":
-        conn.close()
-        save_episode(
-            user_id=user_id,
-            conversation_id=thread_id,
-            summary=f"Tried to cancel booking {booking_id}",
-            outcome="FAILED - booking already Scheduled",
-        )
-        return f"Cannot cancel booking {booking_id} because it is already scheduled."
-
-    conn.execute("UPDATE bookings SET status=? WHERE booking_id=?", ("Canceled", booking_id))
-    conn.commit()
-    conn.close()
-    db_logger.info(f"Canceled room booking_id={booking_id}")
-
-    save_episode(
-        user_id=user_id,
-        conversation_id=thread_id,
-        summary=f"User canceled booking {booking_id}",
-        outcome="success",
-    )
-
-    return f"Cancelled booking {booking_id}."
+    return [book_room, track_booking, update_booking, cancel_booking]

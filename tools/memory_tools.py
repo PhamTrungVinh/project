@@ -5,32 +5,37 @@ from langgraph.prebuilt import InjectedState
 
 from state import AgentState
 from memory import save_fact
+from services.memory_service import remember_fact as _remember_fact
+from database import get_db_session
 
-@tool
-def remember_fact(fact: str, state: Annotated[AgentState, InjectedState]) -> str:
-    """Save a stable, long-term fact about the user.
+def build_memory_tools(owner_id: int) -> list:
+    @tool
+    def remember_fact(fact: str, state: Annotated[AgentState, InjectedState]) -> str:
+        """Save a stable, long-term fact about the user.
 
-    Use ONLY when the information is likely to remain useful
-    across future conversations.
+        Use ONLY when the information is likely to remain useful
+        across future conversations.
 
-    GOOD examples:
-    - User explicitly asks to remember something.
-    - User prefers concise answers.
-    - User prefers Python over JavaScript.
-    - User works in the Sales team.
-    - User is working on a long-term project.
+        GOOD examples:
+        - User explicitly asks to remember something.
+        - User prefers concise answers.
+        - User prefers Python over JavaScript.
+        - User works in the Sales team.
+        - User is working on a long-term project.
 
-    DO NOT use for:
-    - Current questions or requests.
-    - Temporary task information.
-    - Ticket details.
-    - Booking details.
-    - Information needed only for the current conversation.
-    - One-time events.
-    - Sensitive personal information.
+        DO NOT use for:
+        - Current questions or requests.
+        - Temporary task information.
+        - Ticket details.
+        - Booking details.
+        - Information needed only for the current conversation.
+        - One-time events.
+        - Sensitive personal information.
 
-    The fact should be short, general, and written from the user's perspective.
-    """
-    user_id = state.get("user_name", "anonymous")
-    save_fact(user_id, fact)
-    return f"Remembered: {fact}"
+        The fact should be short, general, and written from the user's perspective.
+        """
+        with get_db_session() as db:
+            _remember_fact(db, owner_id, fact)
+            return f"Remembered: {fact}"
+
+        return [remember_fact]

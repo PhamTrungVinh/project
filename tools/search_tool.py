@@ -16,6 +16,12 @@ _search_tool = TavilySearch(
     include_raw_content=False,
 )
 
+def _get_search_tool():
+    global _search_tool
+    if _search_tool is None:
+        from langchain_tavily import TavilySearch
+        _search_tool = TavilySearch(max_results=5, search_depth="advanced", include_answer=True)
+    return _search_tool
 
 @tool
 def search_with_cache(

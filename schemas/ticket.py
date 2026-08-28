@@ -1,3 +1,4 @@
+# schemas/ticket.py
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -9,17 +10,19 @@ class TicketCreate(BaseModel):
     description: str
     customer_name: str | None = None
     customer_phone: str | None = None
-    email: str | None = None  # nếu không truyền, backend tự inject từ context/conversation
+    email: str | None = None
 
 
 class TicketUpdate(BaseModel):
-    """Tất cả field optional - chỉ field nào được truyền mới bị cập nhật."""
     content: str | None = None
     description: str | None = None
     customer_name: str | None = None
     customer_phone: str | None = None
     email: str | None = None
-    status: TicketStatus | None = None
+
+
+class TicketStatusUpdate(BaseModel):
+    status: TicketStatus
 
 
 class TicketOut(BaseModel):
@@ -34,5 +37,4 @@ class TicketOut(BaseModel):
     created_at: datetime
     updated_at: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}

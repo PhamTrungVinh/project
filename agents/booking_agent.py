@@ -1,54 +1,49 @@
-from langchain.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.prebuilt import ToolNode
 
-from config import llm
+from services.ai_adapter import get_chat_llm
+from services.date_service import get_current_datetime_str
 from state import AgentState
-from tools import BOOKING_TOOLS
-from logger import agent_logger
+from tools.booking_tools import build_booking_tools
 from utils.llm_retry import invoke_with_retry
+from logger import agent_logger
+from confirmation import SENSITIVE_TOOLS, build_confirmation_question
+from tasks import add_task
 
-llm_with_booking_tools = llm.bind_tools(BOOKING_TOOLS)
-booking_tool_node = ToolNode(BOOKING_TOOLS)
-
-def build_booking_system_prompt(current_datetime: str) -> str:
-    return(
-        "You are a Booking Agent responsible for booking, tracking, updating, and canceling meeting rooms.\n"
-        f"Current date and time: {current_datetime}.\n"
-        f"When the user says relative time expressions like 'tomorrow', 'next Monday', "
-        f"'in 2 hours', 'this afternoon', etc., convert them to an ABSOLUTE date/time "
-        f"before calling any tool. Always store the 'time' field as a clear, "
-        f"unambiguous absolute date and time, never a relative phrase.\n"
-        "- When creating a new booking, both 'reason' (booking purpose) and 'time' (scheduled time) are required. "
-        "If the user has not provided either of them, ask for the missing information.\n"
-        "- DO NOT ask for the user's email—the system will automatically retrieve it from the context if available.\n"
-        "- Every new booking must have the status 'Scheduled'.\n"
-        "- To track a booking, only the booking_id is required.\n"
-        "- When updating a booking, only modify the fields explicitly provided by the user.\n"
-        "- A booking can only be canceled if its status is not 'Finished'.\n"
-        "- After a tool successfully completes the user's requested action, STOP calling tools."
-        "- Do NOT call additional tools just to verify the result."
-        "- Call exactly one tool whenever possible."
-    )
+BOOKING_SYSTEM_PROMPT_TEMPLATE = (
+    "You are a Booking Agent handling meeting room booking/tracking/updating/canceling.\n"
+    "Current date and time: {current_datetime}.\n"
+    "When the user says relative time ('tomorrow', 'next Monday', 'in 2 hours'),\n"
+    "convert it to an ABSOLUTE date/time before calling any tool.\n"
+    "- To book, both 'reason' and 'time' are required - ask if missing.\n"
+    "- DO NOT ask for the user's email - it is auto-injected from context.\n"
+    "- New bookings always start with status 'Scheduled'.\n"
+    "- Only update fields the user explicitly provides.\n"
+    "- After a tool successfully completes the request, STOP calling tools."
+)
 
 
 def booking_agent_node(state: AgentState) -> dict:
+    owner_id = int(state["user_name"])
+    thread_id = state.get("thread_id", "unknown")
     memory_context = state.get("retrieved_memory", "")
-    current_datetime = state.get("current_datetime", "unknown")
+    current_datetime = state.get("current_datetime") or get_current_datetime_str()
+
+    tools = build_booking_tools(owner_id, thread_id)
+    llm_with_tools = get_chat_llm().bind_tools(tools)
+
     messages = state["messages"]
     if not any(isinstance(m, SystemMessage) for m in messages):
-        system_content = build_booking_system_prompt(current_datetime)
+        system_content = BOOKING_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=current_datetime)
         if memory_context:
             system_content += f"\n\n{memory_context}"
         messages = [SystemMessage(content=system_content)] + messages
 
-    response = invoke_with_retry(llm_with_booking_tools, messages)
-    # print(response.tool_calls) 
+    response = invoke_with_retry(llm_with_tools, messages)
 
     tool_calls = getattr(response, "tool_calls", None)
     if tool_calls:
-        agent_logger.info(
-            f"BOOKING_AGENT calling tools={[tc['name'] for tc in tool_calls]} args={[tc['args'] for tc in tool_calls]}"
-        )
+        agent_logger.info(f"BOOKING_AGENT calling tools={[tc['name'] for tc in tool_calls]}")
     else:
         agent_logger.info(f"BOOKING_AGENT response={response.content[:200]!r}")
 
@@ -57,6 +52,32 @@ def booking_agent_node(state: AgentState) -> dict:
 
 def booking_should_continue(state: AgentState) -> str:
     last = state["messages"][-1]
-    if hasattr(last, "tool_calls") and last.tool_calls:
-        return "tools"
-    return "end"
+    tool_calls = getattr(last, "tool_calls", None)
+    if not tool_calls:
+        return "end"
+    if any(tc["name"] in SENSITIVE_TOOLS for tc in tool_calls):
+        return "confirm"
+    return "tools"
+
+
+def booking_confirm_node(state: AgentState) -> dict:
+    last = state["messages"][-1]
+    sensitive_calls = [tc for tc in last.tool_calls if tc["name"] in SENSITIVE_TOOLS]
+
+    question = build_confirmation_question(sensitive_calls)
+    tasks = add_task(
+        state.get("unfinished_tasks", []),
+        agent="booking",
+        question=question,
+        task_type="confirmation",
+        tool_call=sensitive_calls[0],
+    )
+    agent_logger.info(f"BOOKING_CONFIRM asking confirmation for {sensitive_calls[0]['name']}")
+    return {"messages": [AIMessage(content=question)], "unfinished_tasks": tasks}
+
+
+def booking_tools_node(state: AgentState) -> dict:
+    owner_id = int(state["user_name"])
+    thread_id = state.get("thread_id", "unknown")
+    tool_node = ToolNode(build_booking_tools(owner_id, thread_id))
+    return tool_node.invoke(state)

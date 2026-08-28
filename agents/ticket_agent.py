@@ -1,72 +1,88 @@
-from langchain.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.prebuilt import ToolNode
 
-from config import llm
+from services.ai_adapter import get_chat_llm
+from services.date_service import get_current_datetime_str
 from state import AgentState
-from tools import TICKET_TOOLS
-from logger import agent_logger
+from tools.ticket_tools import build_ticket_tools
 from utils.llm_retry import invoke_with_retry
+from logger import agent_logger
+from confirmation import SENSITIVE_TOOLS, build_confirmation_question
+from tasks import add_task
 
-llm_with_ticket_tools = llm.bind_tools(TICKET_TOOLS)
-ticket_tool_node = ToolNode(TICKET_TOOLS)
-
-TICKET_SYSTEM_PROMPT = (
-    "You are a Ticket Support Agent responsible for creating, tracking, and updating IT or customer support tickets.\n"
-    "- When creating a new ticket, both 'content' and 'description' are required. If the user has not provided them, ask for the missing information.\n"
-    "- DO NOT ask for the user's email, the system will automatically retrieve it from the context if available.\n"
-    "- Every new ticket must have the status 'Pending'.\n"
-    "- To track a ticket, only the ticket_id is required.\n"
-    "- When updating a ticket, only update the fields provided by the user, keeping the rest unchanged. "
-    "- Cannot update tickets that are already 'Finished' or 'Canceled'."
+TICKET_SYSTEM_PROMPT_TEMPLATE = (
+    "You are a Ticket Support Agent handling create/track/update ticket requests.\n"
+    "Current date and time: {current_datetime}.\n"
+    "- To create a ticket, both 'content' and 'description' are required - ask "
+    "if missing.\n"
+    "- DO NOT ask for the user's email - it is auto-injected from context if available.\n"
+    "- New tickets always start with status 'Pending'.\n"
+    "- To track a ticket, only ticket_code is required.\n"
+    "- Only update fields the user explicitly provides.\n"
+    "- Cannot update a ticket already 'Finished' or 'Canceled'.\n"
+    "- After a tool successfully completes the request, STOP calling tools."
 )
 
 
-def _valid_create_ticket_call(tool_call) -> bool:
-    args = tool_call.get("args", {})
-
-    content = args.get("content")
-    description = args.get("description")
-
-    return (
-        isinstance(content, str)
-        and bool(content.strip())
-        and isinstance(description, str)
-        and bool(description.strip())
-    )
-
-
 def ticket_agent_node(state: AgentState) -> dict:
-    messages = state["messages"]
+    owner_id = int(state["user_name"])
+    thread_id = state.get("thread_id", "unknown")
     memory_context = state.get("retrieved_memory", "")
+    current_datetime = state.get("current_datetime") or get_current_datetime_str()
 
+    tools = build_ticket_tools(owner_id, thread_id)
+    llm_with_tools = get_chat_llm().bind_tools(tools)
+
+    messages = state["messages"]
     if not any(isinstance(m, SystemMessage) for m in messages):
-        system_content = TICKET_SYSTEM_PROMPT
-
+        system_content = TICKET_SYSTEM_PROMPT_TEMPLATE.format(current_datetime=current_datetime)
         if memory_context:
             system_content += f"\n\n{memory_context}"
-
         messages = [SystemMessage(content=system_content)] + messages
 
-    response = invoke_with_retry(llm_with_ticket_tools, messages)
+    response = invoke_with_retry(llm_with_tools, messages)
 
     tool_calls = getattr(response, "tool_calls", None)
-
     if tool_calls:
-        agent_logger.info(
-            f"TICKET_AGENT calling tools="
-            f"{[tc['name'] for tc in tool_calls]} "
-            f"args={[tc['args'] for tc in tool_calls]}"
-        )
-    else:
-        agent_logger.info(
-            f"TICKET_AGENT response={response.content[:200]!r}"
-        )
+        agent_logger.info(f"TICKET_AGENT calling tools={[tc['name'] for tc in tool_calls]}")
+        return {"messages": [response]}
 
+    agent_logger.info(f"TICKET_AGENT response={response.content[:200]!r}")
     return {"messages": [response]}
 
 
 def ticket_should_continue(state: AgentState) -> str:
     last = state["messages"][-1]
-    if hasattr(last, "tool_calls") and last.tool_calls:
-        return "tools"
-    return "end"
+    tool_calls = getattr(last, "tool_calls", None)
+    if not tool_calls:
+        return "end"
+    if any(tc["name"] in SENSITIVE_TOOLS for tc in tool_calls):
+        return "confirm"
+    return "tools"
+
+
+def ticket_confirm_node(state: AgentState) -> dict:
+    """Chặn tool nhạy cảm lại, hỏi user xác nhận qua chat thay vì thực thi
+    ngay. Lưu tool_call vào unfinished_tasks để router turn sau xử lý."""
+    last = state["messages"][-1]
+    sensitive_calls = [tc for tc in last.tool_calls if tc["name"] in SENSITIVE_TOOLS]
+
+    question = build_confirmation_question(sensitive_calls)
+    tasks = add_task(
+        state.get("unfinished_tasks", []),
+        agent="ticket",
+        question=question,
+        task_type="confirmation",
+        tool_call=sensitive_calls[0],
+    )
+    agent_logger.info(f"TICKET_CONFIRM asking confirmation for {sensitive_calls[0]['name']}")
+    return {"messages": [AIMessage(content=question)], "unfinished_tasks": tasks}
+
+
+def ticket_tools_node(state: AgentState) -> dict:
+    """Chỉ chạy cho tool KHÔNG nhạy cảm (track_ticket) - tool nhạy cảm đã bị
+    chặn ở ticket_confirm_node."""
+    owner_id = int(state["user_name"])
+    thread_id = state.get("thread_id", "unknown")
+    tool_node = ToolNode(build_ticket_tools(owner_id, thread_id))
+    return tool_node.invoke(state)

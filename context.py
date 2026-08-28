@@ -4,6 +4,8 @@ from state import AgentState
 import db
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from database import get_db_session
+from crud import conversation as conv_crud
 
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
 TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -28,9 +30,10 @@ def context_node(state: AgentState, config: RunnableConfig) -> dict:
 
     email = extract_email(text)
     if email:
-        conversation_id = config.get("configurable", {}).get("thread_id", "unknown")
-        user_id = state.get("user_name")
-        db.upsert_conversation_context(conversation_id, user_id, email)
+        thread_id = state.get("thread_id")
+        if thread_id:
+            with get_db_session() as db:
+                conv_crud.update_conversation_email(db, thread_id, email)
         result["user_email"] = email
 
     return result
