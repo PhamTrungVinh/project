@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: fpt_user
+      POSTGRES_PASSWORD: fpt_password
+      POSTGRES_DB: fpt_chatbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fpt_user -d fpt_chatbot"]   # <-- thêm -d fpt_chatbot
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://fpt_user:fpt_password@postgres:5432/fpt_chatbot
+      GROQ_API: ${GROQ_API}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      PDF_PATH: /app/FSoft_HR.pdf
+      HITL_ENABLED: "true"
+    volumes:
+      - ./FSoft_HR.pdf:/app/FSoft_HR.pdf:ro
+      - faiss_data:/app/faiss_index
+      - log_data:/app/log
+      - hf_cache:/app/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  faiss_data:
+  log_data:
+  hf_cache:

@@ -1,9 +1,3 @@
-"""
-Graph thật: guardrail -> context -> router -> [5 agent] -> supervisor loop -> END.
-HITL kiểu hội thoại: tool nhạy cảm không chạy ngay, agent hỏi lại qua chat
-(node *_confirm), lưu vào unfinished_tasks; turn sau router tự hiểu ý user
-(confirm/cancel/edit) và xử lý.
-"""
 import sqlite3
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -58,8 +52,11 @@ def build_graph():
     workflow.add_edge("context", "router")
 
     workflow.add_conditional_edges("router", route_decision, {
-        "rag_agent": "rag_agent", "web_agent": "web_agent", "ticket_agent": "ticket_agent",
-        "it_support_agent": "it_support_agent", "booking_agent": "booking_agent",
+        "rag_agent": "rag_agent", 
+        "web_agent": "web_agent", 
+        "ticket_agent": "ticket_agent",
+        "it_support_agent": "it_support_agent", 
+        "booking_agent": "booking_agent",
         "confirmed": "confirmed",
     })
     workflow.add_edge("confirmed", END)

@@ -30,6 +30,8 @@ dependencies = [
     "numexpr>=2.10",
     "python-dateutil>=2.9",
     "pytest>=8.0",
+    "psycopg[binary]>=3.2",
+    "langgraph-checkpoint-postgres>=2.0",
 ]
 
 [build-system]

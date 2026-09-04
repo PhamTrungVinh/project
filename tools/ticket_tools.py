@@ -1,11 +1,7 @@
-from typing import Annotated, Optional
+from typing import Optional
 from langchain.tools import tool
-from langgraph.prebuilt import InjectedState
 
-from state import AgentState
-import db
 from logger import db_logger, agent_logger
-from memory import save_episode
 from database import get_db_session
 from crud import tickets as ticket_crud
 from schemas.ticket import TicketCreate, TicketUpdate
@@ -19,22 +15,30 @@ LOCKED_STATUSES = ("Finished", "Canceled")  # không được update nếu ticke
 
 def build_ticket_tools(owner_id: int, thread_id: str) -> list:
     @tool
-    def create_ticket(content, description, customer_name=None, customer_phone=None, email=None) -> str:
+    def create_ticket(
+        content: str,
+        description: str,
+        customer_name: Optional[str] = None,
+        customer_phone: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> str:
         """..."""
         with get_db_session() as db:
-            data = TicketCreate(content=content, description=description,
-                                customer_name=customer_name, customer_phone=customer_phone, email=email)
+            data = TicketCreate(
+                content=content, description=description,
+                customer_name=customer_name, customer_phone=customer_phone, email=email,
+            )
             ticket = ticket_crud.create_ticket(db, owner_id, data)
+            ticket_code = ticket.ticket_code   # <-- lưu NGAY sau khi tạo, trước khi bất kỳ commit nào khác xảy ra
+
             try:
                 remember_episode(db, owner_id, thread_id, f"Created ticket: {content}",
-                                f"ticket_code={ticket.ticket_code}, status=Pending")
+                                f"ticket_code={ticket_code}, status=Pending")
             except Exception as e:
-                # Ticket đã tạo thành công (commit rồi) - lỗi ghi episode chỉ log,
-                # KHÔNG được che mất kết quả tạo ticket đã hoàn tất.
                 agent_logger.warning(f"remember_episode failed after ticket created: {e}")
-        agent_logger.info(f"TICKET_TOOL create ticket_code={ticket.ticket_code} owner_id={owner_id}")
-        return f"Created ticket {ticket.ticket_code}, status: Pending."
 
+        agent_logger.info(f"TICKET_TOOL create ticket_code={ticket_code} owner_id={owner_id}")
+        return f"Created ticket {ticket_code}, status: Pending."
 
     @tool
     def track_ticket(

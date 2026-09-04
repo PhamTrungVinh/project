@@ -25,18 +25,21 @@ def build_booking_tools(owner_id: int, thread_id: str) -> list:
         New bookings always start with status 'Scheduled'."""
         with get_db_session() as db:
             try:
-                data = BookingCreate(
-                    reason=reason, time=time, note=note,
-                    customer_name=customer_name, customer_phone=customer_phone, email=email,
-                )
+                data = BookingCreate(...)
             except Exception:
-                return f"Could not parse time value: {time!r}. Please provide an absolute date/time."
+                return f"Could not parse time value: {time!r}."
 
             booking = booking_crud.create_booking(db, owner_id, data)
-            remember_episode(db, owner_id, thread_id, f"Booked room: {reason}",
-                              f"booking_code={booking.booking_code}, status=Scheduled")
-        agent_logger.info(f"BOOKING_TOOL create booking_code={booking.booking_code} owner_id={owner_id}")
-        return f"Booked room, booking_code: {booking.booking_code}, status: Scheduled."
+            booking_code = booking.booking_code   # <-- lưu ngay
+
+            try:
+                remember_episode(db, owner_id, thread_id, f"Booked room: {reason}",
+                                f"booking_code={booking_code}, status=Scheduled")
+            except Exception as ex:
+                agent_logger.warning(f"remember_episode failed after booking created: {ex}")
+
+        agent_logger.info(f"BOOKING_TOOL create booking_code={booking_code} owner_id={owner_id}")
+        return f"Booked room, booking_code: {booking_code}, status: Scheduled."
 
     @tool
     def track_booking(booking_code: str) -> str:

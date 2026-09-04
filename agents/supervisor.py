@@ -7,7 +7,9 @@ from state import AgentState
 from logger import agent_logger
 from tasks import add_task
 
-MAX_HOPS = 3
+VALID_ROUTES = {"faq", "ticket", "it_support", "booking", "web"}
+
+MAX_HOPS = 5
 
 SUPERVISOR_PROMPT = """You are the Primary Assistant supervising a multi-agent system.
 
@@ -17,12 +19,17 @@ Responses collected so far: {agent_responses}
 Decide ONE outcome:
 1. WAITING FOR USER: latest response is asking a clarifying question (missing
    required fields). -> is_done=true, is_waiting_for_user=true,
-   next_route="<agent currently handling this>", final_answer=<the question text>.
+   next_route="<the SAME agent that just responded, must be one of: faq, ticket, it_support, booking, web>",
+   final_answer=<the question text>.
 2. FULLY SATISFIED: entire request completed with concrete results.
    -> is_done=true, is_waiting_for_user=false, next_route=null,
    final_answer=<combined answer in natural language>.
 3. NEEDS ANOTHER AGENT: a different capability is still needed.
-   -> is_done=false, next_route="<agent needed>".
+   -> is_done=false, next_route="<the agent needed, must be one of: faq, ticket, it_support, booking, web>".
+
+IMPORTANT: next_route must ALWAYS be one of exactly these 5 values: faq, ticket,
+it_support, booking, web. NEVER use any other value like "primary" or "supervisor" -
+if unsure which agent handled the last response, use "web" as a safe default.
 
 Respond with a JSON object matching this schema:
 {{"is_done": bool, "is_waiting_for_user": bool, "next_route": "<route or null>", "final_answer": "<text or null>"}}"""
@@ -53,14 +60,20 @@ def supervisor_node(state: AgentState) -> dict:
 
     llm = get_chat_llm().with_structured_output(SupervisorDecision, method="json_mode")
     responses_text = "\n".join(f"- {r}" for r in agent_responses if r)
-    result: SupervisorDecision = llm.invoke(
-        SUPERVISOR_PROMPT.format(original_query=original_query, agent_responses=responses_text)
-    )
+
+    try:
+        result: SupervisorDecision = llm.invoke(
+            SUPERVISOR_PROMPT.format(original_query=original_query, agent_responses=responses_text)
+        )
+    except Exception as e:
+        # Model trả về route không hợp lệ hoặc parse lỗi -> fallback an toàn:
+        # coi như đã xong, trả nguyên câu trả lời gần nhất thay vì crash cả request.
+        agent_logger.warning(f"SUPERVISOR parse failed: {e}, falling back to last response")
+        fallback = agent_responses[-1] if agent_responses else "Sorry, something went wrong."
+        return {"route": "done", "hop_count": 0, "agent_responses": [],
+                "messages": [AIMessage(content=fallback)]}
 
     if result.is_done and result.is_waiting_for_user:
-        # Đẩy vào hàng đợi unfinished_tasks (có TTL) THAY VÌ sticky active_agent.
-        # Router ở turn sau sẽ tự kiểm tra xem câu trả lời mới có khớp task
-        # này không, KHÔNG ép buộc mọi câu hỏi tiếp theo phải vào agent này.
         agent_logger.info(f"SUPERVISOR hop={hop_count} -> WAITING_FOR_USER, adding task for agent={result.next_route!r}")
         tasks = add_task(
             state.get("unfinished_tasks", []),

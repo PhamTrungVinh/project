@@ -1,16 +1,13 @@
-# tools/memory_tools.py (file mới)
-from typing import Annotated
-from langchain.tools import tool
-from langgraph.prebuilt import InjectedState
+# tools/memory_tools.py
+from langchain_core.tools import tool
 
-from state import AgentState
-from memory import save_fact
 from services.memory_service import remember_fact as _remember_fact
 from database import get_db_session
 
+
 def build_memory_tools(owner_id: int) -> list:
     @tool
-    def remember_fact(fact: str, state: Annotated[AgentState, InjectedState]) -> str:
+    def remember_fact(fact: str) -> str:
         """Save a stable, long-term fact about the user.
 
         Use ONLY when the information is likely to remain useful
@@ -36,6 +33,6 @@ def build_memory_tools(owner_id: int) -> list:
         """
         with get_db_session() as db:
             _remember_fact(db, owner_id, fact)
-            return f"Remembered: {fact}"
+        return f"Remembered: {fact}"
 
-        return [remember_fact]
+    return [remember_fact]
