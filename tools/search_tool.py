@@ -6,6 +6,7 @@ from langgraph.prebuilt import InjectedState
 
 from config import TAVILY_API_KEY
 from state import AgentState
+from logger import agent_logger
 
 _cache = TTLCache(maxsize=100, ttl=3600)
 
@@ -35,8 +36,11 @@ def search_with_cache(
     query = query.strip().lower()
 
     if query in _cache:
+        agent_logger.info("it_search_cache_hit")
         return _cache[query]
 
+    agent_logger.info("it_search_provider_requested")
     result = _search_tool.invoke(query)
     _cache[query] = result
+    agent_logger.info("it_search_provider_completed")
     return result

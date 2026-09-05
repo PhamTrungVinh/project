@@ -25,12 +25,19 @@ def build_booking_tools(owner_id: int, thread_id: str) -> list:
         New bookings always start with status 'Scheduled'."""
         with get_db_session() as db:
             try:
-                data = BookingCreate(...)
+                data = BookingCreate(
+                    reason=reason,
+                    time=time,
+                    customer_name=customer_name,
+                    customer_phone=customer_phone,
+                    note=note,
+                    email=email,
+                )
             except Exception:
                 return f"Could not parse time value: {time!r}."
 
             booking = booking_crud.create_booking(db, owner_id, data)
-            booking_code = booking.booking_code   # <-- lưu ngay
+            booking_code = booking.booking_code   # save immediately
 
             try:
                 remember_episode(db, owner_id, thread_id, f"Booked room: {reason}",

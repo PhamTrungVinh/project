@@ -1,8 +1,8 @@
 """
-Chạy RAGAS evaluation cho rag_agent. Thu thập question/answer/contexts từ
-chính pipeline retrieval thật (rag/setup.py + rag/retrieval.py), rồi chấm điểm.
+Run RAGAS evaluation for rag_agent. It collects questions, answers, and contexts
+from the real retrieval pipeline (rag/setup.py + rag/retrieval.py), then scores them.
 
-Chạy: uv run python eval/run_rag_eval.py
+Run: uv run python eval/run_rag_eval.py
 """
 import os
 
@@ -34,7 +34,7 @@ rag_llm = ChatGroq(
 )
 
 def get_rag_answer_and_contexts(query: str) -> tuple[str, list[str]]:
-    """Chạy đúng pipeline retrieval thật của rag_agent, trả về (answer, contexts)."""
+    """Run rag_agent's actual retrieval pipeline and return (answer, contexts)."""
     resources = build_rag_resources()
     bm25, dense, reranker = resources["bm25"], resources["dense"], resources["reranker"]
 

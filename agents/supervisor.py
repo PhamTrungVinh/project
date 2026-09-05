@@ -7,7 +7,7 @@ from state import AgentState
 from logger import agent_logger
 from tasks import add_task
 
-VALID_ROUTES = {"faq", "ticket", "it_support", "booking", "web"}
+VALID_ROUTES = {"faq", "ticket", "booking", "it_support"}
 
 MAX_HOPS = 5
 
@@ -19,17 +19,16 @@ Responses collected so far: {agent_responses}
 Decide ONE outcome:
 1. WAITING FOR USER: latest response is asking a clarifying question (missing
    required fields). -> is_done=true, is_waiting_for_user=true,
-   next_route="<the SAME agent that just responded, must be one of: faq, ticket, it_support, booking, web>",
+   next_route="<the SAME agent that just responded, must be one of: faq, ticket, booking, it_support>",
    final_answer=<the question text>.
 2. FULLY SATISFIED: entire request completed with concrete results.
    -> is_done=true, is_waiting_for_user=false, next_route=null,
    final_answer=<combined answer in natural language>.
 3. NEEDS ANOTHER AGENT: a different capability is still needed.
-   -> is_done=false, next_route="<the agent needed, must be one of: faq, ticket, it_support, booking, web>".
+   -> is_done=false, next_route="<the agent needed, must be one of: faq, ticket, booking, it_support>".
 
-IMPORTANT: next_route must ALWAYS be one of exactly these 5 values: faq, ticket,
-it_support, booking, web. NEVER use any other value like "primary" or "supervisor" -
-if unsure which agent handled the last response, use "web" as a safe default.
+IMPORTANT: next_route must ALWAYS be one of exactly these 4 values: faq, ticket, booking, it_support. NEVER use any other value.
+If no supported capability remains, finish the response instead of selecting another agent.
 
 Respond with a JSON object matching this schema:
 {{"is_done": bool, "is_waiting_for_user": bool, "next_route": "<route or null>", "final_answer": "<text or null>"}}"""
@@ -38,7 +37,7 @@ Respond with a JSON object matching this schema:
 class SupervisorDecision(BaseModel):
     is_done: bool
     is_waiting_for_user: bool = False
-    next_route: Optional[Literal["faq", "ticket", "it_support", "booking", "web"]] = None
+    next_route: Optional[Literal["faq", "ticket", "booking", "it_support"]] = None
     final_answer: Optional[str] = None
 
 
@@ -66,8 +65,8 @@ def supervisor_node(state: AgentState) -> dict:
             SUPERVISOR_PROMPT.format(original_query=original_query, agent_responses=responses_text)
         )
     except Exception as e:
-        # Model trả về route không hợp lệ hoặc parse lỗi -> fallback an toàn:
-        # coi như đã xong, trả nguyên câu trả lời gần nhất thay vì crash cả request.
+        # If the model returns an invalid route or parsing fails, use a safe fallback:
+        # treat the request as complete and return the latest response instead of crashing.
         agent_logger.warning(f"SUPERVISOR parse failed: {e}, falling back to last response")
         fallback = agent_responses[-1] if agent_responses else "Sorry, something went wrong."
         return {"route": "done", "hop_count": 0, "agent_responses": [],
@@ -95,7 +94,7 @@ def supervisor_node(state: AgentState) -> dict:
 
 def supervisor_decision(state: AgentState) -> str:
     mapping = {
-        "faq": "rag_agent", "web": "web_agent", "ticket": "ticket_agent",
-        "it_support": "it_support_agent", "booking": "booking_agent", "done": "final",
+        "faq": "rag_agent", "ticket": "ticket_agent", "booking": "booking_agent",
+        "it_support": "it_support_agent", "done": "final",
     }
     return mapping.get(state["route"], "final")

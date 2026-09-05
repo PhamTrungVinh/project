@@ -10,9 +10,9 @@ class AgentState(TypedDict):
     route: NotRequired[str]
     hop_count: NotRequired[int]
     agent_responses: NotRequired[list[str]]
-    unfinished_tasks: NotRequired[list[dict]]  # hàng đợi task đang chờ user bổ sung info, có TTL
+    unfinished_tasks: NotRequired[list[dict]]  # queued tasks waiting for user input, with a TTL
 
-    # Context - user_name giữ str(owner_id), KHÔNG phải tên tự nhập như bản cũ
+    # Context: user_name holds str(owner_id), not a user-supplied display name
     user_name: NotRequired[str]
     user_email: NotRequired[str]
     thread_id: NotRequired[str]

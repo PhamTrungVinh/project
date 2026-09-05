@@ -1,7 +1,6 @@
 """
-Cầu nối giữa FastAPI (đã xác thực user qua JWT) và graph LangGraph.
-owner_id truyền vào graph LUÔN lấy từ current_user.id, không bao giờ từ
-input client tự gửi lên.
+Bridge between FastAPI (with JWT-authenticated users) and the LangGraph graph.
+The graph owner_id always comes from current_user.id, never client-supplied input.
 """
 from sqlalchemy.orm import Session
 from langchain_core.messages import HumanMessage, AIMessage
@@ -11,6 +10,7 @@ from crud import conversation as conv_crud
 from services.memory_service import build_memory_context, remember_episode
 from services.date_service import get_current_datetime_str
 from graph.graph import build_graph
+from logger import agent_logger
 
 _app = None
 
@@ -24,6 +24,7 @@ def get_app():
 
 def send_message(db: Session, current_user: User, thread_id: str, message: str) -> dict:
     owner_id = current_user.id
+    agent_logger.info("chat_turn_started owner_id=%s thread_id=%s", owner_id, thread_id)
 
     conversation = conv_crud.get_or_create_conversation(db, owner_id, thread_id)
     conv_crud.set_title_if_empty(db, thread_id, message)
@@ -51,8 +52,11 @@ def send_message(db: Session, current_user: User, thread_id: str, message: str) 
             answer = msg.content
             break
 
-    return {"answer": answer, "route": result.get("route", ""), "thread_id": thread_id}
+    route = result.get("route", "")
+    agent_logger.info("chat_turn_completed owner_id=%s thread_id=%s route=%s answer_present=%s", owner_id, thread_id, route, bool(answer))
+    return {"answer": answer, "route": route, "thread_id": thread_id}
 
 
 def log_task_outcome(db: Session, current_user: User, thread_id: str, summary: str, outcome: str) -> None:
     remember_episode(db, current_user.id, thread_id, summary, outcome)
+    agent_logger.info("chat_task_outcome_recorded owner_id=%s thread_id=%s", current_user.id, thread_id)

@@ -53,7 +53,7 @@ def ticket_agent_node(state: AgentState) -> dict:
         agent_logger.info(f"TICKET_AGENT calling tools={[tc['name'] for tc in tool_calls]}")
         return {"messages": [response]}
 
-    agent_logger.info(f"TICKET_AGENT response={response.content[:200]!r}")
+    agent_logger.info("ticket_agent_response_completed")
     return {"messages": [response]}
 
 
@@ -68,8 +68,8 @@ def ticket_should_continue(state: AgentState) -> str:
 
 
 def ticket_confirm_node(state: AgentState) -> dict:
-    """Chặn tool nhạy cảm lại, hỏi user xác nhận qua chat thay vì thực thi
-    ngay. Lưu tool_call vào unfinished_tasks để router turn sau xử lý."""
+    """Hold sensitive tools for user confirmation instead of executing them.
+    Save the tool call in unfinished_tasks for the router to process next turn."""
     last = state["messages"][-1]
     sensitive_calls = [tc for tc in last.tool_calls if tc["name"] in SENSITIVE_TOOLS]
 
@@ -86,8 +86,8 @@ def ticket_confirm_node(state: AgentState) -> dict:
 
 
 def ticket_tools_node(state: AgentState) -> dict:
-    """Chỉ chạy cho tool KHÔNG nhạy cảm (track_ticket) - tool nhạy cảm đã bị
-    chặn ở ticket_confirm_node."""
+    """Run only non-sensitive tools (track_ticket); sensitive tools are held
+    by ticket_confirm_node."""
     owner_id = int(state["user_name"])
     thread_id = state.get("thread_id", "unknown")
     tool_node = ToolNode(build_ticket_tools(owner_id, thread_id))

@@ -15,6 +15,7 @@ RAG_SYSTEM_PROMPT = (
 def rag_agent_node(state: AgentState) -> dict:
     query = next((m.content for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), "")
 
+    agent_logger.info("rag_retrieval_started")
     groq_client = get_raw_groq_client()
     embeddings = get_embeddings()
     resources = build_rag_resources()
@@ -36,5 +37,5 @@ def rag_agent_node(state: AgentState) -> dict:
     )
     answer = completion.choices[0].message.content
 
-    agent_logger.info(f"RAG_AGENT query={query!r} -> answer={answer[:200]!r}")
+    agent_logger.info("rag_retrieval_completed selected_documents=%s", len(docs))
     return {"messages": [AIMessage(content=answer)]}

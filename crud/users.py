@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from logger import db_logger
 from models.user import User
 from schemas.user import UserCreate
 from utils.security import hash_password
@@ -14,12 +15,9 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 
 
 def create_user(db: Session, data: UserCreate) -> User:
-    user = User(
-        email=data.email,
-        hashed_password=hash_password(data.password),
-        full_name=data.full_name,
-    )
+    user = User(email=data.email, hashed_password=hash_password(data.password), full_name=data.full_name)
     db.add(user)
     db.commit()
     db.refresh(user)
+    db_logger.info("user_created user_id=%s", user.id)
     return user

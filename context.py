@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from database import get_db_session
 from crud import conversation as conv_crud
+from logger import agent_logger
 
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+")
 TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -24,7 +25,7 @@ def context_node(state: AgentState, config: RunnableConfig) -> dict:
 
     now = datetime.now(TIMEZONE)
     result = {
-        "current_datetime": now.strftime("%Y-%m-%d %H:%M:%S %A"),  # luôn cập nhật, KHÔNG như email
+        "current_datetime": now.strftime("%Y-%m-%d %H:%M:%S %A"),  # always update this value, unlike email
     }
 
     email = extract_email(text)
@@ -33,6 +34,7 @@ def context_node(state: AgentState, config: RunnableConfig) -> dict:
         if thread_id:
             with get_db_session() as db:
                 conv_crud.update_conversation_email(db, thread_id, email)
+            agent_logger.info("conversation_email_context_updated thread_id=%s", thread_id)
         result["user_email"] = email
 
     return result

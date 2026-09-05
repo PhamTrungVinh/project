@@ -1,9 +1,9 @@
 """
-HITL hội thoại: khi agent định gọi 1 tool nhạy cảm, KHÔNG thực thi ngay -
-thay vào đó hỏi lại user qua chat, lưu tool_call vào unfinished_tasks (loại
-"confirmation"). Turn sau, router phân loại ý định user (confirm/cancel/edit)
-và xử lý tương ứng. Khi user đồng ý, tool được gọi TRỰC TIẾP bằng args đã lưu
-- không đưa qua LLM quyết định lại, tránh model tự đổi args ngoài ý muốn.
+Conversational HITL: when an agent intends to call a sensitive tool, do not run it
+immediately. Ask the user for confirmation and save the tool_call in unfinished_tasks.
+On the next turn, the router classifies the intent (confirm/cancel/edit). When the
+user confirms, invoke the tool directly with the saved arguments so the LLM cannot
+silently change them.
 """
 from tools.ticket_tools import build_ticket_tools
 from tools.booking_tools import build_booking_tools
@@ -38,7 +38,7 @@ def _get_tool_map(agent: str, owner_id: int, thread_id: str) -> dict:
 
 
 def execute_confirmed_tool_call(agent: str, owner_id: int, thread_id: str, tool_call: dict) -> str:
-    """Thực thi trực tiếp 1 tool_call đã được user xác nhận qua chat."""
+    """Execute a tool call that the user confirmed through chat."""
     tool_map = _get_tool_map(agent, owner_id, thread_id)
     tool = tool_map.get(tool_call["name"])
     if tool is None:

@@ -12,7 +12,8 @@ it_tool_node = ToolNode(IT_SUPPORT_TOOLS)
 
 IT_SUPPORT_SYSTEM_PROMPT = (
     "You are an IT Support Agent helping with technical issues on computers "
-    "and electronic devices.\n"
+    "and electronic devices. You also handle standalone greetings, farewells, thanks, "
+    "and brief acknowledgements with a short, friendly response.\n"
     "- Use the search tool for troubleshooting guides from reliable sources.\n"
     "- Support both Vietnamese and English.\n"
     "- Give practical, easy-to-understand solutions with reference links if available."
@@ -36,7 +37,7 @@ def it_support_agent_node(state: AgentState) -> dict:
     if tool_calls:
         agent_logger.info(f"IT_SUPPORT_AGENT calling tools={[tc['name'] for tc in tool_calls]}")
     else:
-        agent_logger.info(f"IT_SUPPORT_AGENT response={response.content[:200]!r}")
+        agent_logger.info("it_support_agent_response_completed")
 
     return {"messages": [response]}
 

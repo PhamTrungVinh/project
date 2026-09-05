@@ -5,8 +5,8 @@ load_dotenv()
 
 GROQ_API_KEY = os.environ["GROQ_API"]
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # optional - chỉ cần nếu dùng ChatOpenAI qua OpenRouter
-JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]  # BẮT BUỘC - dùng chung cho toàn bộ auth, KHÔNG định nghĩa lại ở utils/security.py
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")  # optional; required only when using ChatOpenAI through OpenRouter
+JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]  # REQUIRED; shared by all authentication code. Do not redefine it in utils/security.py.
 
 PDF_PATH = os.getenv("PDF_PATH", "/home/vinh/vinh/test_ai/unit3/project/FSoft_HR.pdf")
 FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "faiss_index")
@@ -20,7 +20,7 @@ _groq_client = None
 
 
 def get_llm():
-    """LLM chính dùng cho router/supervisor/agents."""
+    """Primary LLM used by the router, supervisor, and agents."""
     global _llm
     if _llm is None:
         from langchain_groq import ChatGroq
@@ -29,7 +29,7 @@ def get_llm():
 
 
 def get_guardrail_llm():
-    """LLM riêng cho guardrail."""
+    """Dedicated LLM used by the guardrail."""
     global _guardrail_llm
     if _guardrail_llm is None:
         from langchain_groq import ChatGroq
@@ -38,7 +38,7 @@ def get_guardrail_llm():
 
 
 def get_embeddings():
-    """Embedding model dùng cho RAG + semantic/episodic memory."""
+    """Embedding model used by RAG and semantic/episodic memory."""
     global _embeddings
     if _embeddings is None:
         from langchain_huggingface import HuggingFaceEmbeddings

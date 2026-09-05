@@ -45,7 +45,7 @@ def booking_agent_node(state: AgentState) -> dict:
     if tool_calls:
         agent_logger.info(f"BOOKING_AGENT calling tools={[tc['name'] for tc in tool_calls]}")
     else:
-        agent_logger.info(f"BOOKING_AGENT response={response.content[:200]!r}")
+        agent_logger.info("booking_agent_response_completed")
 
     return {"messages": [response]}
 

@@ -7,7 +7,7 @@ from config import JWT_SECRET_KEY
 
 SECRET_KEY = JWT_SECRET_KEY
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 1 ngày
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 1 day
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -21,8 +21,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """data nên chứa {"sub": str(user.id)} - 'sub' (subject) là claim chuẩn của JWT
-    để xác định user sở hữu token này."""
+    """data should contain {"sub": str(user.id)}; the standard JWT subject claim
+    identifies the user who owns this token."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
@@ -30,7 +30,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 
 def decode_access_token(token: str) -> dict | None:
-    """Trả về payload nếu token hợp lệ và chưa hết hạn, None nếu không."""
+    """Return the payload when the token is valid and unexpired, otherwise None."""
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:

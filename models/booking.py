@@ -13,7 +13,7 @@ class Booking(Base):
     __tablename__ = "bookings"
 
     id = Column(Integer, primary_key=True, index=True)
-    booking_code = Column(String, unique=True, index=True)  # "BKG-xxxx" hiển thị cho user
+    booking_code = Column(String, unique=True, index=True)  # "BKG-xxxx" displayed to the user
 
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
@@ -24,7 +24,7 @@ class Booking(Base):
     customer_phone = Column(String, nullable=True)
     email = Column(String, nullable=True)
     status = Column(
-        SAEnum(BookingStatus, native_enum=False),  # native_enum=False -> lưu dạng VARCHAR trong SQLite, tương thích tốt hơn
+        SAEnum(BookingStatus, native_enum=False),  # native_enum=False stores VARCHAR in SQLite for better compatibility
         default=BookingStatus.SCHEDULED,
         nullable=False,
     )

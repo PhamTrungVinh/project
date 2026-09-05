@@ -1,0 +1,231 @@
+MICROSERVICE MIGRATION ROADMAP
+===============================
+
+Purpose
+-------
+Turn this FastAPI/LangGraph customer-support assistant into independently deployable
+services without breaking the existing frontend/API behavior. Use a gradual
+"strangler" migration: keep the current backend operating while each bounded
+capability is extracted and tested.
+
+Current-state observations
+--------------------------
+* One FastAPI process serves auth, users, tickets, bookings, conversations,
+  memory, and /chat.
+* /chat synchronously invokes an in-process LangGraph graph. The graph calls
+  FAQ/RAG, web, ticket, booking, and IT agents and persists checkpoints in a
+  local SQLite file.
+* Application data also uses local SQLite (database.py hardcodes app.db), even
+  though docker-compose passes DATABASE_URL for PostgreSQL. That environment
+  variable is currently ignored.
+* RAG has local FAISS files and a PDF mounted into the backend container.
+* HITL confirmation and long-term memory are part of the chat flow; preserve
+  their behavior and user/thread ownership during every migration phase.
+
+Target architecture
+-------------------
+Client -> API gateway/BFF -> chat-orchestrator -> domain services
+                                  |               |-- knowledge-rag
+                                  |               |-- ticket
+                                  |               |-- booking
+                                  |               |-- it-support
+                                  |               |-- web-tools
+                                  |               |-- memory
+                                  |               |-- identity (or existing auth)
+                                  |
+                                  +-> workflow/checkpoint store
+
+All external traffic enters the gateway. The gateway validates JWTs, applies
+rate limits, and forwards identity headers/tokens. The chat-orchestrator owns
+LangGraph routing, supervisor logic, tool/HITL state, and final response
+assembly. Domain services own their business data and expose stable APIs. Use
+an event broker for facts that do not need an immediate response (for example,
+ticket-created, booking-created, memory-requested, audit events).
+
+Recommended first deployment stack
+----------------------------------
+* Containers: Docker Compose locally; Kubernetes only after service boundaries
+  and operational needs are proven.
+* Gateway: Traefik, Kong, or an existing company ingress/API gateway.
+* Databases: PostgreSQL. Start with one PostgreSQL cluster but give every
+  service its own database/schema, credentials, migrations, and tables.
+* Async transport: RabbitMQ, NATS, or Kafka. RabbitMQ is a sensible first
+  choice for this workload; do not introduce a broker until an extracted flow
+  needs asynchronous delivery.
+* Caches/locks: Redis for rate limiting, short-lived conversation locks,
+  idempotency keys, and optional response caching.
+* RAG: object storage for PDFs/index artifacts and a dedicated vector store
+  (pgvector is a simple initial choice; Qdrant is a good dedicated option).
+* Observability: OpenTelemetry traces, structured JSON logs, Prometheus metrics,
+  and a centralized log backend. Propagate a correlation ID from the gateway
+  through every request and event.
+
+Phase 0 - establish a safe baseline
+-----------------------------------
+1. Document every public endpoint, request/response model, authentication rule,
+   table, LangGraph node, tool, external API, and background side effect.
+2. Add integration tests for login, chat routing, FAQ/RAG, ticket creation,
+   booking creation, HITL approve/reject, conversation history, and memory.
+3. Add contract tests for the frontend-facing REST API, beginning with /chat,
+   /tickets, /bookings, and auth. Keep these contracts stable through migration.
+4. Add health (/health), readiness (/ready), and version endpoints, structured
+   logs, request IDs, and metrics to the monolith.
+5. Define SLOs such as chat availability, p95 response time, tool failure rate,
+   RAG retrieval latency, and confirmation completion rate. Capture current
+   values as the baseline.
+
+Phase 1 - repair configuration and persistence before extraction
+-----------------------------------------------------------------
+1. Change database.py to read DATABASE_URL. Retain SQLite only as an explicit
+   local-development default, not as an unintentional production fallback.
+2. Introduce Alembic migrations; do not use Base.metadata.create_all() as the
+   production schema migration mechanism.
+3. Move app data from SQLite to PostgreSQL. Validate row counts, foreign keys,
+   passwords, timestamps, and per-user/thread access after migration.
+4. Move LangGraph checkpoints from local checkpoints.db to a production-safe,
+   shared checkpointer/store. Ensure multiple orchestrator replicas can resume
+   the same thread correctly.
+5. Replace local FAISS and mounted PDF assumptions with versioned artifacts in
+   object storage. Keep index build/version metadata so queries use a known
+   document/index version.
+6. Put secrets in a secret manager or deployment secrets; remove credentials
+   from Compose defaults in production. Add config validation at startup.
+
+Phase 2 - modular monolith boundaries
+--------------------------------------
+1. Keep one deployable backend, but reorganize modules by capability:
+   identity, chat-orchestration, ticket, booking, knowledge, memory, it-support,
+   web-tools, and shared platform libraries.
+2. Define interfaces at each boundary. The orchestrator must call interfaces,
+   not directly import ticket_tools, booking_tools, CRUD modules, or SQLAlchemy
+   models from another capability.
+3. Separate shared code into small versioned packages only for genuinely common
+   concerns: API contracts, authentication claims, observability, error format,
+   and event envelope. Do not create a large shared business-model package.
+4. Make every mutation idempotent. Accept an Idempotency-Key on ticket and
+   booking commands; persist the result keyed by authenticated user and key.
+5. Model HITL explicitly: persist a pending action with action ID, actor,
+   thread ID, expiry, desired operation, approval status, and idempotency key.
+   Approval/rejection must be safe to retry and must never trust client-supplied
+   owner IDs.
+
+Phase 3 - extract low-risk services first
+------------------------------------------
+1. Extract knowledge-rag service.
+   - Own document ingestion, chunking, embedding, index versions, retrieval,
+     reranking, and citation metadata.
+   - API: POST /v1/query with query, requester context, and index version;
+     return passages, scores, source citations, and version.
+   - Run ingestion asynchronously; serving queries must not rebuild the index.
+2. Extract web-tools service.
+   - Own Tavily/search and calculator integrations, quotas, timeouts, retries,
+     sanitization, and provider-specific API keys.
+   - API: POST /v1/search and POST /v1/calculate. The orchestrator remains
+     responsible for deciding whether a tool should be used.
+3. Put both behind internal DNS and call them from adapters in the monolith.
+   Use timeouts, circuit breakers, retries only for safe operations, and a
+   graceful user-facing fallback when a dependency is unavailable.
+
+Phase 4 - extract transactional domain services
+------------------------------------------------
+1. Extract ticket service.
+   - Own tickets table/data, ticket statuses, validation, and audit history.
+   - Commands: create/update/cancel ticket. Queries: get/list ticket.
+   - Publish TicketCreated and TicketUpdated events using an outbox table.
+2. Extract booking service with the equivalent ownership, API, idempotency, and
+   transactional outbox pattern. Treat availability checks and booking commits
+   as a single domain operation where possible.
+3. Extract memory service.
+   - Own semantic/episodic memory, retrieval policy, retention, deletion, and
+     user privacy controls.
+   - Provide synchronous retrieval for a chat turn and asynchronous recording
+     for completed interactions. Enforce deletion/retention consistently.
+4. Extract IT-support service only if it has independent tools, data, teams, or
+   scaling needs. Otherwise keep it as an orchestrator-owned stateless agent
+   adapter initially.
+5. Use each service's database as private implementation detail. Other services
+   access business data only through the service API/events, never by joining
+   another service's tables.
+
+Phase 5 - extract the chat-orchestrator
+----------------------------------------
+1. Create a chat-orchestrator service containing AgentState, guardrail,
+   context, router, supervisor, LangGraph definition, HITL coordination, and
+   adapters for every extracted domain service.
+2. Expose POST /v1/chat/messages. Its input contains message and optional
+   client-generated thread ID; identity comes only from validated gateway JWT
+   claims. Return answer, route, thread ID, pending-action information, and a
+   correlation ID.
+3. Expose POST /v1/pending-actions/{id}/decision for approve/reject. Authorize
+   against the persisted action owner and make repeated decisions idempotent.
+4. Store workflow state/checkpoints outside the pod and use an optimistic
+   version or per-thread lock to prevent concurrent turns from corrupting state.
+5. Keep the old /chat endpoint as a compatibility adapter until the frontend
+   fully uses the gateway route. Shadow selected traffic and compare route,
+   answer safety, tool calls, and side effects before shifting traffic.
+
+Phase 6 - gateway, events, and production rollout
+--------------------------------------------------
+1. Route public endpoints through the gateway; make domain service endpoints
+   private. Centralize CORS, JWT verification, request size limits, rate limits,
+   and API versioning there.
+2. Standardize error responses, correlation IDs, deadlines, pagination, and
+   authorization claim propagation across services.
+3. Define a versioned event envelope: event_id, event_type, occurred_at,
+   producer, schema_version, correlation_id, causation_id, and payload. Use
+   durable consumers and deduplication by event_id.
+4. Use the transactional outbox pattern for database mutation plus event
+   publishing; do not rely on distributed transactions between services.
+5. Deploy per-service CI/CD: unit, integration, contract, security, container,
+   and migration tests. Promote immutable image tags through environments.
+6. Use canary or percentage rollout, dashboards, alerting, backups, restore
+   drills, and a rollback plan that preserves database compatibility.
+
+Service ownership and interfaces
+--------------------------------
+Service              Owns                                      Sync interface
+identity             users, credentials, JWT issuance          login/refresh/JWKS
+chat-orchestrator    graph state, routing, HITL, response       chat + decision APIs
+knowledge-rag        documents, indexes, retrieval metadata     query API
+ticket               tickets and ticket audit trail             ticket command/query API
+booking              bookings and booking audit trail           booking command/query API
+memory               semantic/episodic memories and policy      retrieve/write/delete API
+web-tools            external search/calculation integration    search/calculate API
+it-support           IT-specific integrations/data (if needed)  support action/query API
+
+Security and reliability requirements
+-------------------------------------
+* Use service-to-service authentication (mTLS, workload identity, or signed
+  internal JWTs); never rely only on private-network placement.
+* Propagate authenticated subject, scopes, and correlation ID. Each service
+  re-authorizes sensitive operations against its own owned resource.
+* Never send raw secrets, passwords, or unnecessary PII in events, prompts,
+  traces, or logs. Encrypt data in transit and at rest.
+* Apply strict input/output validation around LLM prompts and tool arguments.
+  Keep guardrails in the orchestrator and enforce business validation again in
+  domain services.
+* Set deadlines, bounded retries with jitter, circuit breakers, bulkheads, and
+  clear fallback messages for every remote dependency.
+* Back up PostgreSQL and vector/document stores; periodically test restoration.
+
+Definition of done
+------------------
+* Every service can be built, tested, deployed, scaled, and rolled back
+  independently.
+* No service reads or writes another service's database directly.
+* Chat turns, checkpoints, pending approvals, and idempotent mutations survive
+  process restarts and multiple replicas.
+* Frontend API contracts and authorization behavior remain compatible.
+* Distributed traces show a chat request through orchestrator, tools, events,
+  and domain services; dashboards and alerts cover the defined SLOs.
+* The old monolith paths are removed only after traffic, data reconciliation,
+  and rollback windows demonstrate parity.
+
+Suggested implementation order
+------------------------------
+1. Configuration/PostgreSQL/Alembic/checkpointer/observability.
+2. Internal capability interfaces and contract tests.
+3. knowledge-rag, then web-tools.
+4. ticket, booking, and memory services with private databases and outboxes.
+5. chat-orchestrator and durable HITL workflow state.
+6. Gateway rollout, traffic migration, then deletion of monolith code.

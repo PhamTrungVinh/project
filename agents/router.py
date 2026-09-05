@@ -8,25 +8,48 @@ from logger import agent_logger
 from tasks import prune_expired, remove_task
 from confirmation import execute_confirmed_tool_call
 
-ROUTER_PROMPT = """You are the Primary Assistant.
+ROUTER_PROMPT = """You are the Primary Assistant for a company support system.
 
-Analyze the user's request and choose the single most appropriate agent from the following five categories:
+Choose exactly one route for the user's CURRENT request. Use these strict precedence rules:
 
-- "faq": Questions about company policies, internal regulations, HR policies, or other information stored in the company's knowledge base.
-- "ticket": Requests to create, track, update, or manage IT or customer support tickets.
-- "it_support": Technical issues involving computers, software, hardware, networks, or other electronic devices that require troubleshooting.
-- "booking": Requests to create, view, update, or cancel meeting room bookings.
-- "web": general questions, news, calculations, requests to remember personal information/preferences (e.g., "remember that I prefer...", "note that I work in..."), or anything unclear that falls outside the four categories above.
+1. Choose "ticket" for any request to create, open, submit, track, check, update,
+   change, resolve, cancel, or manage a support ticket. This rule takes priority
+   whenever the user mentions a ticket, even if the request also contains a policy
+   question or technical problem. Examples:
+   - "I need to create a ticket" -> ticket
+   - "Open a ticket for my VPN problem" -> ticket
+   - "What is the status of ticket TCK-123?" -> ticket
+   - "Change the description on my ticket" -> ticket
+
+2. Choose "booking" for any request to create, view, track, update, reschedule,
+   or cancel a meeting-room booking. Examples:
+   - "Book a room tomorrow" -> booking
+   - "Cancel my booking" -> booking
+
+3. Choose "it_support" only when the user wants troubleshooting or technical help
+   and is NOT asking to create or manage a ticket. Use it for standalone greetings,
+   farewells, thanks, and acknowledgements allowed by the guardrail, so the LLM can
+   respond naturally. Examples:
+   - "My VPN will not connect" -> it_support
+   - "Hello" -> it_support
+
+4. Choose "faq" only for an informational question about company policy, HR policy,
+   internal regulations, or the knowledge base. FAQ never creates, updates, tracks,
+   or cancels a ticket or booking. Examples:
+   - "What is the annual-leave policy?" -> faq
+   - "How many days of parental leave do employees receive?" -> faq
+
+Do not infer an action from a general policy question. Do not send ticket or booking
+requests to FAQ. Return only JSON matching this schema:
+{{"route": "<faq|ticket|booking|it_support>"}}
 
 User request:
 {query}
-
-Respond with a JSON object matching this schema: {{"route": "<one of faq|ticket|it_support|booking|web>"}}
 """
 
 
 class RouteDecision(BaseModel):
-    route: Literal["faq", "ticket", "it_support", "booking", "web"]
+    route: Literal["faq", "ticket", "booking", "it_support"]
 
 
 class TaskMatch(BaseModel):
@@ -62,7 +85,11 @@ def router_node(state: AgentState) -> dict:
     thread_id = state.get("thread_id", "unknown")
 
     if tasks:
-        agent_logger.info(f"ROUTER checking query={query!r} against {len(tasks)} pending task(s)")
+        agent_logger.info(
+            "router_checking_pending_tasks count=%s",
+            len(tasks),
+            extra={"user_request": query},
+        )
         tasks_list = "\n".join(
             f'- id="{t["id"]}" (agent={t["agent"]}, type={t["type"]}): {t["question"]}' for t in tasks
         )
@@ -84,32 +111,50 @@ def router_node(state: AgentState) -> dict:
                     result_text = execute_confirmed_tool_call(
                         matched["agent"], owner_id, thread_id, matched["tool_call"]
                     )
+                    agent_logger.info(
+                        "router_selected_route",
+                        extra={"user_request": query, "route": "confirmed"},
+                    )
                     return {"route": "confirmed", "unfinished_tasks": remaining,
                              "messages": [AIMessage(content=result_text)]}
 
                 if match.intent == "cancel":
                     agent_logger.info(f"ROUTER confirmation CANCELED for task {matched['id']}")
+                    agent_logger.info(
+                        "router_selected_route",
+                        extra={"user_request": query, "route": "confirmed"},
+                    )
                     return {"route": "confirmed", "unfinished_tasks": remaining,
                              "messages": [AIMessage(content="Ok, I won't proceed with that action.")]}
 
                 agent_logger.info(f"ROUTER confirmation EDIT requested for task {matched['id']}, back to {matched['agent']}")
+                agent_logger.info(
+                    "router_selected_route",
+                    extra={"user_request": query, "route": matched["agent"]},
+                )
                 return {"route": matched["agent"], "unfinished_tasks": remaining}
             else:
                 agent_logger.info(f"ROUTER matched info_request task {matched['id']} -> route={matched['agent']}")
+                agent_logger.info(
+                    "router_selected_route",
+                    extra={"user_request": query, "route": matched["agent"]},
+                )
                 return {"route": matched["agent"], "unfinished_tasks": remove_task(tasks, matched["id"])}
 
     route_llm = get_chat_llm().with_structured_output(RouteDecision, method="json_mode")
     result: RouteDecision = route_llm.invoke(ROUTER_PROMPT.format(query=query))
-    agent_logger.info(f"ROUTER query={query!r} -> route={result.route} (fresh classification)")
+    agent_logger.info(
+        "router_selected_route",
+        extra={"user_request": query, "route": result.route},
+    )
     return {"route": result.route, "unfinished_tasks": tasks}
 
 
 def route_decision(state: AgentState) -> Literal[
-    "rag_agent", "web_agent", "ticket_agent", "it_support_agent", "booking_agent", "confirmed"
+    "rag_agent", "ticket_agent", "booking_agent", "it_support_agent", "confirmed"
 ]:
     mapping = {
-        "faq": "rag_agent", "web": "web_agent", "ticket": "ticket_agent",
-        "it_support": "it_support_agent", "booking": "booking_agent",
-        "confirmed": "confirmed",
+        "faq": "rag_agent", "ticket": "ticket_agent", "booking": "booking_agent",
+        "it_support": "it_support_agent", "confirmed": "confirmed",
     }
-    return mapping.get(state["route"], "web_agent")
+    return mapping.get(state["route"], "it_support_agent")

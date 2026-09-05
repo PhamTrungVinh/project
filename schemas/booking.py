@@ -6,7 +6,7 @@ from models.booking import BookingStatus
 
 class BookingCreate(BaseModel):
     reason: str
-    time: datetime  # Pydantic tự parse chuỗi ISO thành datetime, báo lỗi rõ ràng nếu sai định dạng
+    time: datetime  # Pydantic parses ISO strings into datetime and reports invalid formats clearly
     note: str | None = None
     customer_name: str | None = None
     customer_phone: str | None = None

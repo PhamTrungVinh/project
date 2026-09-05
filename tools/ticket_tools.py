@@ -10,7 +10,7 @@ from utils.exceptions import NotFoundException, ConflictException
 from services.memory_service import remember_episode
 
 VALID_STATUSES = ["Pending", "Resolving", "Canceled", "Finished"]
-LOCKED_STATUSES = ("Finished", "Canceled")  # không được update nếu ticket đang ở trạng thái này
+LOCKED_STATUSES = ("Finished", "Canceled")  # tickets in these statuses cannot be updated
 
 
 def build_ticket_tools(owner_id: int, thread_id: str) -> list:
@@ -29,7 +29,7 @@ def build_ticket_tools(owner_id: int, thread_id: str) -> list:
                 customer_name=customer_name, customer_phone=customer_phone, email=email,
             )
             ticket = ticket_crud.create_ticket(db, owner_id, data)
-            ticket_code = ticket.ticket_code   # <-- lưu NGAY sau khi tạo, trước khi bất kỳ commit nào khác xảy ra
+            ticket_code = ticket.ticket_code   # save immediately after creation, before any later commit
 
             try:
                 remember_episode(db, owner_id, thread_id, f"Created ticket: {content}",

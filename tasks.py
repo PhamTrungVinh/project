@@ -1,8 +1,8 @@
 """
-Quản lý danh sách unfinished_tasks trong AgentState. Có 2 loại task:
-- "info_request": agent hỏi thêm thông tin còn thiếu
-- "confirmation": agent chờ user xác nhận trước khi thực thi 1 tool nhạy cảm
-  (kèm sẵn tool_call = {"name": ..., "args": ...})
+Manages the AgentState unfinished_tasks list. There are two task types:
+- "info_request": the agent is waiting for missing information.
+- "confirmation": the agent is waiting for the user to approve a sensitive tool call
+  (with tool_call = {"name": ..., "args": ...}).
 """
 import time
 import uuid
@@ -35,7 +35,7 @@ def add_task(
 
     agent_logger.info(
         f"TASK_ADD id={new_task['id']} agent={agent} type={task_type} ttl={ttl_seconds}s "
-        f"question={question[:100]!r} total_tasks={len(tasks)}"
+        f"total_tasks={len(tasks)}"
     )
 
     if len(tasks) > MAX_UNFINISHED_TASKS:
