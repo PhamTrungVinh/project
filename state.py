@@ -8,6 +8,7 @@ class AgentState(TypedDict):
 
     # Routing
     route: NotRequired[str]
+    simple_pleasantry: NotRequired[bool]
     hop_count: NotRequired[int]
     agent_responses: NotRequired[list[str]]
     unfinished_tasks: NotRequired[list[dict]]  # queued tasks waiting for user input, with a TTL

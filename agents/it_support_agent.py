@@ -46,4 +46,6 @@ def it_support_should_continue(state: AgentState) -> str:
     last = state["messages"][-1]
     if hasattr(last, "tool_calls") and last.tool_calls:
         return "tools"
+    if state.get("simple_pleasantry"):
+        return "final"
     return "end"

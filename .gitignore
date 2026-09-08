@@ -15,3 +15,7 @@ log/
 checkpoints.db
 app.db
 FSoft_HR.pdf
+
+alembic/versions/__pycache__/
+
+.rag-cache/

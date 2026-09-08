@@ -1,5 +1,5 @@
 import os
-from config import PDF_PATH, FAISS_INDEX_PATH
+from rag.storage import get_rag_artifact_paths
 from services.ai_adapter import get_embeddings
 
 _resources = None
@@ -17,8 +17,9 @@ def build_rag_resources():
     from sentence_transformers import CrossEncoder
 
     embeddings = get_embeddings()
+    pdf_path, faiss_index_path = get_rag_artifact_paths()
 
-    loader = PyPDFLoader(PDF_PATH)
+    loader = PyPDFLoader(str(pdf_path))
     docs = loader.load()
 
     text_splitter = SemanticChunker(embeddings)
@@ -26,11 +27,11 @@ def build_rag_resources():
 
     reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-    if os.path.exists(FAISS_INDEX_PATH):
-        vector_store = FAISS.load_local(FAISS_INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
+    if os.path.exists(faiss_index_path):
+        vector_store = FAISS.load_local(str(faiss_index_path), embeddings, allow_dangerous_deserialization=True)
     else:
         vector_store = FAISS.from_documents(all_splits, embeddings)
-        vector_store.save_local(FAISS_INDEX_PATH)
+        vector_store.save_local(str(faiss_index_path))
 
     dense = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 50})
     bm25 = BM25Retriever.from_documents(all_splits)

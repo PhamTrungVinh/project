@@ -4,6 +4,7 @@ from langchain.messages import HumanMessage, SystemMessage, AIMessage
 from config import guardrail_llm
 from state import AgentState
 from logger import agent_logger
+from utils.intent import is_standalone_pleasantry
 
 REFUSAL_MESSAGE = (
     "Sorry, I cannot assist with this request because it violates the usage policy. "
@@ -61,6 +62,9 @@ the active task; it does not allow unsafe instructions or unrelated requests.
 
 def guardrail_node(state: AgentState) -> dict:
     query = state["messages"][-1].content
+    if is_standalone_pleasantry(query):
+        agent_logger.info("guardrail_allowed_standalone_pleasantry")
+        return {"blocked": False}
 
     policy = GUARDRAIL_POLICY
     if state.get("unfinished_tasks"):

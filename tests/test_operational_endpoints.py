@@ -21,3 +21,10 @@ def test_version_and_metrics_are_available(client):
     assert version.status_code == 200
     assert version.json()["service"] == "fpt-customer-chatbot-api"
     assert "http_requests_total" in metrics.text
+
+
+def test_lifespan_initializes_graph_before_requests(client):
+    # Entering TestClient has already run the application lifespan without a request DB session.
+    from services import chat_service
+
+    assert chat_service.get_app() is not None

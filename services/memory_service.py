@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from crud import memory as memory_crud
+from models.memory import EpisodicMemory, SemanticMemory
 from services.ai_adapter import embed_text
 
 
@@ -10,6 +11,8 @@ def remember_fact(db: Session, owner_id: int, fact: str) -> None:
 
 
 def recall_facts(db: Session, owner_id: int, query: str, top_k: int = 3) -> list[str]:
+    if db.query(SemanticMemory.id).filter(SemanticMemory.owner_id == owner_id).first() is None:
+        return []
     query_embedding = embed_text(query)
     return memory_crud.search_facts(db, owner_id, query_embedding, top_k=top_k)
 
@@ -20,6 +23,8 @@ def remember_episode(db: Session, owner_id: int, thread_id: str, summary: str, o
 
 
 def recall_episodes(db: Session, owner_id: int, query: str, top_k: int = 3) -> list[dict]:
+    if db.query(EpisodicMemory.id).filter(EpisodicMemory.owner_id == owner_id).first() is None:
+        return []
     query_embedding = embed_text(query)
     return memory_crud.search_episodes(db, owner_id, query_embedding, top_k=top_k)
 

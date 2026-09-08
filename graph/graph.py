@@ -1,8 +1,9 @@
 import sqlite3
-from langchain_core.messages import AIMessage
+
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 
+from config import get_checkpoint_database_url
 from state import AgentState
 from context import context_node
 from guardrail import guardrail_node, guardrail_decision, blocked_response_node
@@ -15,9 +16,27 @@ from agents import (
     it_support_agent_node, it_support_should_continue, it_tool_node,
 )
 
+_postgres_checkpointer_context = None
+
 
 def _passthrough(state: AgentState) -> dict:
     return {}
+
+
+def build_checkpointer():
+    """Use a shared PostgreSQL saver when configured, otherwise local SQLite."""
+    global _postgres_checkpointer_context
+    checkpoint_url = get_checkpoint_database_url()
+    if checkpoint_url is None:
+        connection = sqlite3.connect("checkpoints.db", check_same_thread=False)
+        return SqliteSaver(connection)
+
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    _postgres_checkpointer_context = PostgresSaver.from_conn_string(checkpoint_url)
+    saver = _postgres_checkpointer_context.__enter__()
+    saver.setup()
+    return saver
 
 
 def build_graph():
@@ -29,7 +48,6 @@ def build_graph():
     workflow.add_node("router", router_node)
     workflow.add_node("supervisor", supervisor_node)
     workflow.add_node("confirmed", _passthrough)
-
     workflow.add_node("rag_agent", rag_agent_node)
     workflow.add_node("ticket_agent", ticket_agent_node)
     workflow.add_node("ticket_tools", ticket_tools_node)
@@ -51,7 +69,6 @@ def build_graph():
     })
     workflow.add_edge("confirmed", END)
     workflow.add_edge("rag_agent", "supervisor")
-
     workflow.add_conditional_edges("ticket_agent", ticket_should_continue, {
         "tools": "ticket_tools", "confirm": "ticket_confirm", "end": "supervisor",
     })
@@ -63,15 +80,11 @@ def build_graph():
     workflow.add_edge("booking_tools", "booking_agent")
     workflow.add_edge("booking_confirm", END)
     workflow.add_conditional_edges("it_support_agent", it_support_should_continue, {
-        "tools": "it_tools", "end": "supervisor",
+        "tools": "it_tools", "end": "supervisor", "final": END,
     })
     workflow.add_edge("it_tools", "it_support_agent")
-
     workflow.add_conditional_edges("supervisor", supervisor_decision, {
         "rag_agent": "rag_agent", "ticket_agent": "ticket_agent",
         "booking_agent": "booking_agent", "it_support_agent": "it_support_agent", "final": END,
     })
-
-    conn = sqlite3.connect("checkpoints.db", check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(checkpointer=build_checkpointer())

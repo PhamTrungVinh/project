@@ -7,6 +7,7 @@ from state import AgentState
 from logger import agent_logger
 from tasks import prune_expired, remove_task
 from confirmation import execute_confirmed_tool_call
+from utils.intent import is_standalone_pleasantry
 
 ROUTER_PROMPT = """You are the Primary Assistant for a company support system.
 
@@ -115,7 +116,7 @@ def router_node(state: AgentState) -> dict:
                         "router_selected_route",
                         extra={"user_request": query, "route": "confirmed"},
                     )
-                    return {"route": "confirmed", "unfinished_tasks": remaining,
+                    return {"route": "confirmed", "unfinished_tasks": remaining, "simple_pleasantry": False,
                              "messages": [AIMessage(content=result_text)]}
 
                 if match.intent == "cancel":
@@ -124,7 +125,7 @@ def router_node(state: AgentState) -> dict:
                         "router_selected_route",
                         extra={"user_request": query, "route": "confirmed"},
                     )
-                    return {"route": "confirmed", "unfinished_tasks": remaining,
+                    return {"route": "confirmed", "unfinished_tasks": remaining, "simple_pleasantry": False,
                              "messages": [AIMessage(content="Ok, I won't proceed with that action.")]}
 
                 agent_logger.info(f"ROUTER confirmation EDIT requested for task {matched['id']}, back to {matched['agent']}")
@@ -132,14 +133,21 @@ def router_node(state: AgentState) -> dict:
                     "router_selected_route",
                     extra={"user_request": query, "route": matched["agent"]},
                 )
-                return {"route": matched["agent"], "unfinished_tasks": remaining}
+                return {"route": matched["agent"], "unfinished_tasks": remaining, "simple_pleasantry": False}
             else:
                 agent_logger.info(f"ROUTER matched info_request task {matched['id']} -> route={matched['agent']}")
                 agent_logger.info(
                     "router_selected_route",
                     extra={"user_request": query, "route": matched["agent"]},
                 )
-                return {"route": matched["agent"], "unfinished_tasks": remove_task(tasks, matched["id"])}
+                return {"route": matched["agent"], "unfinished_tasks": remove_task(tasks, matched["id"]), "simple_pleasantry": False}
+
+    if is_standalone_pleasantry(query):
+        agent_logger.info(
+            "router_selected_route",
+            extra={"user_request": query, "route": "it_support"},
+        )
+        return {"route": "it_support", "unfinished_tasks": tasks, "simple_pleasantry": True}
 
     route_llm = get_chat_llm().with_structured_output(RouteDecision, method="json_mode")
     result: RouteDecision = route_llm.invoke(ROUTER_PROMPT.format(query=query))
@@ -147,7 +155,7 @@ def router_node(state: AgentState) -> dict:
         "router_selected_route",
         extra={"user_request": query, "route": result.route},
     )
-    return {"route": result.route, "unfinished_tasks": tasks}
+    return {"route": result.route, "unfinished_tasks": tasks, "simple_pleasantry": False}
 
 
 def route_decision(state: AgentState) -> Literal[
