@@ -1,0 +1,87 @@
+flowchart TD
+    U[User] --> FE[React frontend]
+    FE --> API[FastAPI: POST /chat]
+    API --> AUTH[JWT authentication]
+    AUTH --> ORCH[Chat orchestration]
+
+    subgraph APPDB[Application database]
+        USERS[(users)]
+        CONV[(conversation_context)]
+        SMEM[(semantic_memory)]
+        EMEM[(episodic_memory)]
+        PA[(pending_actions)]
+        TDB[(tickets)]
+        BDB[(bookings)]
+    end
+
+    subgraph CPDB[LangGraph checkpoint store]
+        CPLOCAL[(Local: checkpoints.db SQLite)]
+        CPPROD[(Deployment: PostgreSQL via CHECKPOINT_DATABASE_URL)]
+    end
+
+    AUTH --> USERS
+    ORCH -->|create/read conversation and set title| CONV
+    ORCH -->|retrieve relevant facts and episodes| MEM[Build memory context]
+    SMEM --> MEM
+    EMEM --> MEM
+    ORCH --> LG[LangGraph invocation]
+    LG -->|local default: persist graph state by thread| CPLOCAL
+    LG -. deployment or configured backend .-> CPPROD
+
+    LG --> G{Guardrail}
+    G -- Unsafe --> BLOCK[Refusal response] --> OUT[API response]
+    G -- Safe --> CTX[Context enrichment: time and email detection]
+    CTX -->|email found: upsert email| CONV
+    CTX --> R{Router}
+
+    R -- FAQ / HR policy --> FAQ[RAG agent]
+    R -- Ticket management --> TKT[Ticket agent]
+    R -- Room booking --> BKG[Booking agent]
+    R -- IT help / greeting --> IT[IT-support agent]
+    R -- Pending action confirmed or cancelled --> CONF[Execute or cancel saved action]
+
+    FAQ --> SUP[Supervisor]
+    TKT --> TDEC{Ticket decision}
+    BKG --> BDEC{Booking decision}
+    IT --> IDEC{IT-support decision}
+
+    TDEC -- Tool needed --> TTOOLS[Ticket tools]
+    TTOOLS -->|create/update/read ticket| TDB
+    TTOOLS --> TKT
+    TDEC -- Sensitive action --> TCP[Create confirmation task]
+    TCP -->|save action, arguments, status, expiry| PA
+    TCP --> OUT
+    TDEC -- Done --> SUP
+
+    BDEC -- Tool needed --> BTOOLS[Booking tools]
+    BTOOLS -->|create/update/read/cancel booking| BDB
+    BTOOLS --> BKG
+    BDEC -- Sensitive action --> BCP[Create confirmation task]
+    BCP -->|save action, arguments, status, expiry| PA
+    BCP --> OUT
+    BDEC -- Done --> SUP
+
+    IDEC -- Tool needed --> ITOOLS[IT-support tools] --> IT
+    IDEC -- Done --> SUP
+    IDEC -- Final --> OUT
+
+    R -->|load active confirmation actions| PA
+    CONF -->|approve, reject, or mark executed| PA
+    CONF -->|approved action writes ticket or booking| TDB
+    CONF -->|approved action writes ticket or booking| BDB
+    CONF --> OUT
+
+    SUP -- Complete --> OUT
+    SUP -- Needs clarification --> TASK[Save unfinished task] --> OUT
+    SUP -- Another capability needed, maximum 5 handoffs --> R2{Next agent}
+    R2 --> FAQ
+    R2 --> TKT
+    R2 --> BKG
+    R2 --> IT
+
+    OUT --> FE
+
+    FE -->|POST /chat/memory/fact| FACT[Save user fact]
+    FACT -->|fact plus embedding| SMEM
+    FE -->|POST /chat/task-outcome| EPISODE[Save task outcome]
+    EPISODE -->|summary, outcome, embedding| EMEM

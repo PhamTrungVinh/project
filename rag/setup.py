@@ -1,11 +1,10 @@
-import os
 from rag.storage import get_rag_artifact_paths
 from services.ai_adapter import get_embeddings
 
 _resources = None
 
 
-def build_rag_resources():
+def build_rag_resources(*, allow_index_build: bool = False):
     global _resources
     if _resources is not None:
         return _resources
@@ -27,11 +26,18 @@ def build_rag_resources():
 
     reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
-    if os.path.exists(faiss_index_path):
+    index_files_exist = (
+        (faiss_index_path / "index.faiss").exists()
+        and (faiss_index_path / "index.pkl").exists()
+    )
+
+    if index_files_exist:
         vector_store = FAISS.load_local(str(faiss_index_path), embeddings, allow_dangerous_deserialization=True)
-    else:
+    elif allow_index_build:
         vector_store = FAISS.from_documents(all_splits, embeddings)
         vector_store.save_local(str(faiss_index_path))
+    else:
+        raise RuntimeError("RAG index is unavailable. Build and publish an approved artifact before serving queries.")
 
     dense = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 50})
     bm25 = BM25Retriever.from_documents(all_splits)

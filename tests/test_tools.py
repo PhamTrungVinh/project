@@ -82,3 +82,25 @@ def test_booking_tools_lifecycle(db_session: Session, test_user: User):
         # 4. Cancel booking
         cancel_res = cancel_r.invoke({"booking_code": booking_code})
         assert f"Canceled booking {booking_code}" in cancel_res
+
+
+def test_ticket_tool_uses_authenticated_profile_when_llm_omits_contact_fields(db_session: Session, test_user: User):
+    with patch("services.memory_service.remember_episode"):
+        create_ticket, track_ticket, *_ = build_ticket_tools(test_user.id, "profile-ticket")
+        created = create_ticket.invoke({"content": "Laptop issue", "description": "Will not start"})
+        ticket_code = created.split("Created ticket ")[1].split(",")[0]
+        tracked = track_ticket.invoke({"ticket_code": ticket_code})
+
+    assert "customer_name: Test User" in tracked
+    assert "email: testuser@example.com" in tracked
+
+
+def test_booking_tool_uses_authenticated_profile_when_llm_omits_contact_fields(db_session: Session, test_user: User):
+    with patch("services.memory_service.remember_episode"):
+        book_room, track_booking, *_ = build_booking_tools(test_user.id, "profile-booking")
+        created = book_room.invoke({"reason": "Planning", "time": "2026-09-14 14:00:00"})
+        booking_code = created.split("booking_code: ")[1].split(",")[0]
+        tracked = track_booking.invoke({"booking_code": booking_code})
+
+    assert "customer_name: Test User" in tracked
+    assert "email: testuser@example.com" in tracked

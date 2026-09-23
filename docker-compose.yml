@@ -30,6 +30,9 @@ services:
       RAG_ARTIFACT_URI: ${RAG_ARTIFACT_URI:-}
       RAG_ARTIFACT_VERSION: ${RAG_ARTIFACT_VERSION:-}
       HITL_ENABLED: "true"
+      KNOWLEDGE_ADAPTER: http
+      KNOWLEDGE_SERVICE_URL: http://knowledge-rag:8001
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?KNOWLEDGE_SERVICE_TOKEN is required}
     volumes:
       - ./FSoft_HR.pdf:/app/FSoft_HR.pdf:ro
       - faiss_data:/app/faiss_index
@@ -38,6 +41,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      knowledge-rag:
+        condition: service_started
+
+  knowledge-rag:
+    build: .
+    command: uv run uvicorn knowledge_api:app --host 0.0.0.0 --port 8001
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      GROQ_API: ${GROQ_API}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:?KNOWLEDGE_SERVICE_TOKEN is required}
+      PDF_PATH: /app/FSoft_HR.pdf
+      RAG_ARTIFACT_URI: ${RAG_ARTIFACT_URI:-}
+      RAG_ARTIFACT_VERSION: ${RAG_ARTIFACT_VERSION:-}
+    volumes:
+      - ./FSoft_HR.pdf:/app/FSoft_HR.pdf:ro
+      - faiss_data:/app/faiss_index:ro
+      - hf_cache:/app/.cache/huggingface
 
   frontend:
     build:

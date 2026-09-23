@@ -16,3 +16,10 @@ def test_get_current_datetime_str():
     assert len(parts) >= 2
     # First part is date YYYY-MM-DD
     assert len(parts[0].split("-")) == 3
+
+
+def test_format_local_datetime_converts_utc_to_vietnam_time():
+    from datetime import datetime, timezone
+    from services.date_service import format_local_datetime
+
+    assert format_local_datetime(datetime(2026, 9, 9, 9, 28, 21, tzinfo=timezone.utc)) == "2026-09-09 16:28:21 +07"

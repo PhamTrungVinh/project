@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-from langchain.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from guardrail import GUARDRAIL_POLICY, PENDING_TASK_POLICY, guardrail_decision, blocked_response_node, guardrail_node, REFUSAL_MESSAGE
 
 

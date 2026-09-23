@@ -31,6 +31,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         app_logger.warning("login_rejected invalid_credentials")
         raise UnauthorizedException("Incorrect email or password")
 
-    access_token = create_access_token(data={"sub": str(user.id)})
+    access_token = create_access_token(data={
+        "sub": str(user.id),
+        "email": user.email,
+        "name": user.full_name,
+    })
     app_logger.info("login_succeeded user_id=%s", user.id)
     return Token(access_token=access_token)

@@ -13,16 +13,13 @@ from config import validate_startup_configuration
 from logger import app_logger, request_id_context
 from utils.exceptions import AppException
 from routers import auth, users, tickets, bookings, chat
+from services.chat_service import get_app
 
 APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_startup_configuration()
-    # Initialize PostgresSaver before request-scoped SQLAlchemy sessions exist.
-    # Its schema setup creates concurrent indexes and must not run inside a chat request.
-    from services.chat_service import get_app
-
     get_app()
     app_logger.info("application_started environment=%s", os.getenv("APP_ENV", "development"))
     yield

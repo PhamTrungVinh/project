@@ -12,8 +12,8 @@ def _cosine(a, b) -> float:
     return 0.0 if denominator == 0 else float(np.dot(a, b) / denominator)
 
 
-def save_fact(db: Session, owner_id: int, fact: str, embedding: list[float]) -> SemanticMemory:
-    row = SemanticMemory(owner_id=owner_id, fact=fact, embedding=json.dumps(embedding))
+def save_fact(db: Session, owner_id: int, fact: str, embedding: list[float], expires_at=None) -> SemanticMemory:
+    row = SemanticMemory(owner_id=owner_id, fact=fact, embedding=json.dumps(embedding), expires_at=expires_at)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -40,8 +40,8 @@ def clear_facts(db: Session, owner_id: int) -> int:
     return count
 
 
-def save_episode(db: Session, owner_id: int, thread_id: str, summary: str, outcome: str, embedding: list[float]) -> EpisodicMemory:
-    row = EpisodicMemory(owner_id=owner_id, thread_id=thread_id, summary=summary, outcome=outcome, embedding=json.dumps(embedding))
+def save_episode(db: Session, owner_id: int, thread_id: str, summary: str, outcome: str, embedding: list[float], expires_at=None) -> EpisodicMemory:
+    row = EpisodicMemory(owner_id=owner_id, thread_id=thread_id, summary=summary, outcome=outcome, embedding=json.dumps(embedding), expires_at=expires_at)
     db.add(row)
     db.commit()
     db.refresh(row)

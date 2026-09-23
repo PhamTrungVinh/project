@@ -11,18 +11,21 @@ def _generate_booking_code() -> str:
     return f"BKG-{uuid.uuid4().hex[:8].upper()}"
 
 
-def create_booking(db: Session, owner_id: int, data: BookingCreate) -> Booking:
+def create_booking(db: Session, owner_id: int, data: BookingCreate, *, commit: bool = True) -> Booking:
     booking = Booking(booking_code=_generate_booking_code(), owner_id=owner_id, reason=data.reason,
                       time=data.time, note=data.note, customer_name=data.customer_name,
                       customer_phone=data.customer_phone, email=data.email, status=BookingStatus.SCHEDULED)
     db.add(booking)
-    db.commit()
-    db.refresh(booking)
+    if commit:
+        db.commit()
+        db.refresh(booking)
+    else:
+        db.flush()
     db_logger.info("booking_created owner_id=%s booking_code=%s status=%s", owner_id, booking.booking_code, booking.status.value)
     return booking
 
 
-def get_booking_by_code(db: Session, owner_id: int, booking_code: str) -> Booking:
+def get_booking_by_code(db: Session, owner_id: int, booking_code: str, *, commit: bool = True) -> Booking:
     booking = db.query(Booking).filter(Booking.booking_code == booking_code, Booking.owner_id == owner_id).first()
     if booking is None:
         db_logger.warning("booking_not_found_or_not_owned owner_id=%s booking_code=%s", owner_id, booking_code)
@@ -37,7 +40,7 @@ def list_bookings(db: Session, owner_id: int, skip: int = 0, limit: int = 50) ->
     return bookings
 
 
-def update_booking(db: Session, owner_id: int, booking_code: str, data: BookingUpdate) -> Booking:
+def update_booking(db: Session, owner_id: int, booking_code: str, data: BookingUpdate, *, commit: bool = True) -> Booking:
     booking = get_booking_by_code(db, owner_id, booking_code)
     if booking.status == BookingStatus.FINISHED:
         db_logger.warning("booking_update_rejected_finished owner_id=%s booking_code=%s", owner_id, booking_code)
@@ -47,19 +50,25 @@ def update_booking(db: Session, owner_id: int, booking_code: str, data: BookingU
         raise ConflictException("No fields provided for update")
     for field, value in update_data.items():
         setattr(booking, field, value)
-    db.commit()
-    db.refresh(booking)
+    if commit:
+        db.commit()
+        db.refresh(booking)
+    else:
+        db.flush()
     db_logger.info("booking_updated owner_id=%s booking_code=%s fields=%s", owner_id, booking_code, sorted(update_data))
     return booking
 
 
-def cancel_booking(db: Session, owner_id: int, booking_code: str) -> Booking:
+def cancel_booking(db: Session, owner_id: int, booking_code: str, *, commit: bool = True) -> Booking:
     booking = get_booking_by_code(db, owner_id, booking_code)
     if booking.status == BookingStatus.FINISHED:
         db_logger.warning("booking_cancel_rejected_finished owner_id=%s booking_code=%s", owner_id, booking_code)
         raise ConflictException(f"Cannot cancel booking {booking_code} because it is already Finished")
     booking.status = BookingStatus.CANCELED
-    db.commit()
-    db.refresh(booking)
+    if commit:
+        db.commit()
+        db.refresh(booking)
+    else:
+        db.flush()
     db_logger.info("booking_canceled owner_id=%s booking_code=%s", owner_id, booking_code)
     return booking

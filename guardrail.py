@@ -1,5 +1,5 @@
 import json
-from langchain.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from config import guardrail_llm
 from state import AgentState

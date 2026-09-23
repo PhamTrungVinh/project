@@ -1,5 +1,5 @@
-from datetime import datetime
-from pydantic import BaseModel
+from datetime import datetime, timezone
+from pydantic import BaseModel, field_serializer
 
 from models.booking import BookingStatus
 
@@ -37,3 +37,9 @@ class BookingOut(BaseModel):
 
     class Config:
         from_attributes = True
+    @field_serializer("time")
+    def serialize_time_as_utc(self, value: datetime) -> str:
+        """Return an unambiguous UTC ISO timestamp, including SQLite rows."""
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat()

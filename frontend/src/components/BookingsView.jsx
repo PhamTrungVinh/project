@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import { bookingApi } from "../api.js";
 
+const formatAppTime = (value) => `${new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  dateStyle: "medium",
+  timeStyle: "medium",
+}).format(new Date(value))} ICT`;
+
 export default function BookingsView() {
   const [bookings, setBookings] = useState([]);
   const [reason, setReason] = useState("");
@@ -63,7 +69,7 @@ export default function BookingsView() {
         <div className="card" key={b.booking_code}>
           <b>{b.booking_code}</b> <span className={`badge ${b.status}`}>{b.status}</span>
           <div>{b.reason}</div>
-          <div className="meta">{new Date(b.time).toLocaleString()}</div>
+          <div className="meta">{formatAppTime(b.time)}</div>
           {b.status !== "Finished" && b.status !== "Canceled" && (
             <button className="danger" style={{ marginTop: 8 }} onClick={() => handleCancel(b.booking_code)}>
               Hủy

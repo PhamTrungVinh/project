@@ -7,6 +7,8 @@ from state import AgentState
 from logger import agent_logger
 from tasks import prune_expired, remove_task
 from confirmation import execute_confirmed_tool_call
+from database import get_db_session
+from services import pending_action_service
 from utils.intent import is_standalone_pleasantry
 
 ROUTER_PROMPT = """You are the Primary Assistant for a company support system.
@@ -40,9 +42,14 @@ Choose exactly one route for the user's CURRENT request. Use these strict preced
    - "What is the annual-leave policy?" -> faq
    - "How many days of parental leave do employees receive?" -> faq
 
-Do not infer an action from a general policy question. Do not send ticket or booking
-requests to FAQ. Return only JSON matching this schema:
-{{"route": "<faq|ticket|booking|it_support>"}}
+Interpret the user's meaning, including paraphrases and informal language.
+Identify ALL requested capabilities in requested_routes, without duplicates.
+Choose route as the first capability to handle using the precedence above, and
+include it in requested_routes. A technical problem mentioned as the subject of
+a ticket is not a separate troubleshooting request unless the user asks for help
+with it too. Do not infer an action from a general policy question.
+Return only JSON matching this schema:
+{{"route": "<faq|ticket|booking|it_support>", "requested_routes": ["<route>", "..."]}}
 
 User request:
 {query}
@@ -51,6 +58,7 @@ User request:
 
 class RouteDecision(BaseModel):
     route: Literal["faq", "ticket", "booking", "it_support"]
+    requested_routes: list[Literal["faq", "ticket", "booking", "it_support"]]
 
 
 class TaskMatch(BaseModel):
@@ -81,9 +89,12 @@ Respond with a JSON object: {{"matches_task_id": "<id or null>", "intent": "<con
 
 def router_node(state: AgentState) -> dict:
     query = state["messages"][-1].content
-    tasks = prune_expired(state.get("unfinished_tasks", []))
     owner_id = int(state["user_name"])
     thread_id = state.get("thread_id", "unknown")
+    checkpoint_tasks = prune_expired(state.get("unfinished_tasks", []))
+    with get_db_session() as db:
+        durable_tasks = pending_action_service.active_tasks(db, owner_id, thread_id)
+    tasks = durable_tasks + [task for task in checkpoint_tasks if task.get("type") != "confirmation"]
 
     if tasks:
         agent_logger.info(
@@ -109,23 +120,38 @@ def router_node(state: AgentState) -> dict:
 
                 if match.intent == "confirm":
                     agent_logger.info(f"ROUTER confirmation CONFIRMED for task {matched['id']}, executing tool directly")
-                    result_text = execute_confirmed_tool_call(
-                        matched["agent"], owner_id, thread_id, matched["tool_call"]
-                    )
+                    pending_action_id = matched.get("pending_action_id")
+                    if pending_action_id:
+                        with get_db_session() as db:
+                            action = pending_action_service.decide(db, owner_id, thread_id, pending_action_id, approved=True)
+                            result_text = execute_confirmed_tool_call(
+                                matched["agent"], owner_id, thread_id, matched["tool_call"], action.idempotency_key
+                            )
+                            pending_action_service.mark_executed(db, action)
+                    else:
+                        result_text = execute_confirmed_tool_call(
+                            matched["agent"], owner_id, thread_id, matched["tool_call"]
+                        )
                     agent_logger.info(
                         "router_selected_route",
                         extra={"user_request": query, "route": "confirmed"},
                     )
                     return {"route": "confirmed", "unfinished_tasks": remaining, "simple_pleasantry": False,
+                             "last_completed_agent": matched["agent"],
                              "messages": [AIMessage(content=result_text)]}
 
                 if match.intent == "cancel":
+                    pending_action_id = matched.get("pending_action_id")
+                    if pending_action_id:
+                        with get_db_session() as db:
+                            pending_action_service.decide(db, owner_id, thread_id, pending_action_id, approved=False)
                     agent_logger.info(f"ROUTER confirmation CANCELED for task {matched['id']}")
                     agent_logger.info(
                         "router_selected_route",
                         extra={"user_request": query, "route": "confirmed"},
                     )
                     return {"route": "confirmed", "unfinished_tasks": remaining, "simple_pleasantry": False,
+                             "last_completed_agent": matched["agent"],
                              "messages": [AIMessage(content="Ok, I won't proceed with that action.")]}
 
                 agent_logger.info(f"ROUTER confirmation EDIT requested for task {matched['id']}, back to {matched['agent']}")
@@ -147,7 +173,9 @@ def router_node(state: AgentState) -> dict:
             "router_selected_route",
             extra={"user_request": query, "route": "it_support"},
         )
-        return {"route": "it_support", "unfinished_tasks": tasks, "simple_pleasantry": True}
+        return {"route": "it_support", "unfinished_tasks": tasks, "simple_pleasantry": True,
+                "active_request": query, "requested_routes": ["it_support"],
+                "completed_routes": [], "last_completed_agent": None}
 
     route_llm = get_chat_llm().with_structured_output(RouteDecision, method="json_mode")
     result: RouteDecision = route_llm.invoke(ROUTER_PROMPT.format(query=query))
@@ -155,7 +183,11 @@ def router_node(state: AgentState) -> dict:
         "router_selected_route",
         extra={"user_request": query, "route": result.route},
     )
-    return {"route": result.route, "unfinished_tasks": tasks, "simple_pleasantry": False}
+    return {"route": result.route, "unfinished_tasks": tasks, "simple_pleasantry": False,
+            "active_request": query,
+            "requested_routes": list(dict.fromkeys([result.route, *result.requested_routes])),
+            "completed_routes": [], "last_completed_agent": None,
+            "agent_responses": [], "hop_count": 0}
 
 
 def route_decision(state: AgentState) -> Literal[

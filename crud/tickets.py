@@ -13,7 +13,7 @@ def _generate_ticket_code() -> str:
     return f"TCK-{uuid.uuid4().hex[:8].upper()}"
 
 
-def create_ticket(db: Session, owner_id: int, data: TicketCreate) -> Ticket:
+def create_ticket(db: Session, owner_id: int, data: TicketCreate, *, commit: bool = True) -> Ticket:
     ticket = Ticket(
         ticket_code=_generate_ticket_code(),
         owner_id=owner_id,
@@ -25,8 +25,11 @@ def create_ticket(db: Session, owner_id: int, data: TicketCreate) -> Ticket:
         status=TicketStatus.PENDING,
     )
     db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
+    if commit:
+        db.commit()
+        db.refresh(ticket)
+    else:
+        db.flush()
     db_logger.info("ticket_created owner_id=%s ticket_code=%s status=%s", owner_id, ticket.ticket_code, ticket.status.value)
     return ticket
 
@@ -60,7 +63,7 @@ def list_tickets(db: Session, owner_id: int, skip: int = 0, limit: int = 50) -> 
     return tickets
 
 
-def update_ticket(db: Session, owner_id: int, ticket_code: str, data: TicketUpdate) -> Ticket:
+def update_ticket(db: Session, owner_id: int, ticket_code: str, data: TicketUpdate, *, commit: bool = True) -> Ticket:
     ticket = get_ticket_by_code(db, owner_id, ticket_code)  # ownership has already been checked
 
     if ticket.status in LOCKED_STATUSES:
@@ -76,13 +79,16 @@ def update_ticket(db: Session, owner_id: int, ticket_code: str, data: TicketUpda
     for field, value in update_data.items():
         setattr(ticket, field, value)
 
-    db.commit()
-    db.refresh(ticket)
+    if commit:
+        db.commit()
+        db.refresh(ticket)
+    else:
+        db.flush()
     db_logger.info("ticket_updated owner_id=%s ticket_code=%s fields=%s", owner_id, ticket_code, sorted(update_data))
     return ticket
 
 
-def update_ticket_status(db: Session, owner_id: int, ticket_code: str, status: TicketStatus) -> Ticket:
+def update_ticket_status(db: Session, owner_id: int, ticket_code: str, status: TicketStatus, *, commit: bool = True) -> Ticket:
     ticket = get_ticket_by_code(db, owner_id, ticket_code)
 
     if ticket.status in LOCKED_STATUSES:
@@ -93,7 +99,10 @@ def update_ticket_status(db: Session, owner_id: int, ticket_code: str, status: T
 
     previous_status = ticket.status.value
     ticket.status = status
-    db.commit()
-    db.refresh(ticket)
+    if commit:
+        db.commit()
+        db.refresh(ticket)
+    else:
+        db.flush()
     db_logger.info("ticket_status_updated owner_id=%s ticket_code=%s from_status=%s to_status=%s", owner_id, ticket_code, previous_status, status.value)
     return ticket

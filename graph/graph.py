@@ -67,7 +67,7 @@ def build_graph():
         "booking_agent": "booking_agent", "it_support_agent": "it_support_agent",
         "confirmed": "confirmed",
     })
-    workflow.add_edge("confirmed", END)
+    workflow.add_edge("confirmed", "supervisor")
     workflow.add_edge("rag_agent", "supervisor")
     workflow.add_conditional_edges("ticket_agent", ticket_should_continue, {
         "tools": "ticket_tools", "confirm": "ticket_confirm", "end": "supervisor",

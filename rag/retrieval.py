@@ -62,7 +62,7 @@ def hybrid_retrieve(query, bm25_retriever, dense_retriever, top_n=50):
 
 def hyde_query(query, client):
     completion = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="openai/gpt-oss-120b",
         messages=[
             {"role": "system", "content": "Write a short factual passage that would likely answer the user's question. Do not mention that it is hypothetical."},
             {"role": "user", "content": query},

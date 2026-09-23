@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import { ticketApi } from "../api.js";
 
+const formatAppTime = (value) => `${new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Ho_Chi_Minh",
+  dateStyle: "medium",
+  timeStyle: "medium",
+}).format(new Date(value))} ICT`;
+
 export default function TicketsView() {
   const [tickets, setTickets] = useState([]);
   const [content, setContent] = useState("");
@@ -51,7 +57,7 @@ export default function TicketsView() {
           <b>{t.ticket_code}</b> <span className={`badge ${t.status}`}>{t.status}</span>
           <div>{t.content}</div>
           <div className="meta">{t.description}</div>
-          <div className="meta">{new Date(t.created_at).toLocaleString()}</div>
+          <div className="meta">{formatAppTime(t.created_at)}</div>
         </div>
       ))}
     </div>

@@ -34,7 +34,16 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0",
     "alembic>=1.19.2",
     "s3fs>=2026.7.0",
+    "torch>=2.14.0",
 ]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]

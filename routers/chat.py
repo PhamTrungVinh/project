@@ -2,6 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
+from config import MEMORY_ADAPTER
 from database import get_db
 from dependencies import get_current_user
 from models.user import User
@@ -13,7 +14,8 @@ from schemas.chat import (
     MemoryFactCreate,
     MemoryClearResponse,
 )
-from services import chat_service, memory_service
+from services import chat_orchestration_service as chat_service, memory_service
+from services.domain_remote_adapter import memory_request
 from crud import conversation as conv_crud
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -76,7 +78,10 @@ def add_fact(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    memory_service.remember_fact(db=db, owner_id=current_user.id, fact=data.fact)
+    if MEMORY_ADAPTER == "http":
+        memory_request(current_user, "POST", "/v1/memory/facts", data.model_dump(mode="json"))
+    else:
+        memory_service.remember_fact(db=db, owner_id=current_user.id, fact=data.fact)
     return {"status": "success", "message": "Fact saved successfully"}
 
 
@@ -85,4 +90,6 @@ def clear_memory(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if MEMORY_ADAPTER == "http":
+        return memory_request(current_user, "DELETE", "/v1/memory")
     return memory_service.clear_all_memory(db=db, owner_id=current_user.id)

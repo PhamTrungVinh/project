@@ -1,12 +1,14 @@
-# routers/tickets.py
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
+from config import TICKET_ADAPTER
 from database import get_db
 from dependencies import get_current_user
 from models.user import User
 from schemas.ticket import TicketCreate, TicketUpdate, TicketStatusUpdate, TicketOut
-from crud import tickets as ticket_crud
+from services import ticket_service
+from services.domain_remote_adapter import ticket_request
+from services.identity_service import claims_for_user
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -16,8 +18,15 @@ def create_ticket(
     data: TicketCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    return ticket_crud.create_ticket(db, current_user.id, data)
+    if TICKET_ADAPTER == "http":
+        return ticket_request(
+            current_user, "POST", "/tickets/",
+            data.model_dump(mode="json", exclude_none=True),
+            idempotency_key=idempotency_key,
+        )
+    return ticket_service.create_ticket(db, current_user.id, data, idempotency_key, claims_for_user(current_user))
 
 
 @router.get("/", response_model=list[TicketOut])
@@ -27,7 +36,9 @@ def list_tickets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return ticket_crud.list_tickets(db, current_user.id, skip=skip, limit=limit)
+    if TICKET_ADAPTER == "http":
+        return ticket_request(current_user, "GET", "/tickets/", query={"skip": skip, "limit": limit})
+    return ticket_service.list_tickets(db, current_user.id, skip=skip, limit=limit)
 
 
 @router.get("/{ticket_code}", response_model=TicketOut)
@@ -36,7 +47,9 @@ def get_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return ticket_crud.get_ticket_by_code(db, current_user.id, ticket_code)
+    if TICKET_ADAPTER == "http":
+        return ticket_request(current_user, "GET", f"/tickets/{ticket_code}")
+    return ticket_service.get_ticket(db, current_user.id, ticket_code)
 
 
 @router.patch("/{ticket_code}", response_model=TicketOut)
@@ -45,8 +58,14 @@ def update_ticket(
     data: TicketUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    return ticket_crud.update_ticket(db, current_user.id, ticket_code, data)
+    if TICKET_ADAPTER == "http":
+        return ticket_request(
+            current_user, "PATCH", f"/tickets/{ticket_code}",
+            data.model_dump(mode="json", exclude_none=True), idempotency_key=idempotency_key,
+        )
+    return ticket_service.update_ticket(db, current_user.id, ticket_code, data, idempotency_key)
 
 
 @router.patch("/{ticket_code}/status", response_model=TicketOut)
@@ -55,5 +74,11 @@ def update_ticket_status(
     data: TicketStatusUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    return ticket_crud.update_ticket_status(db, current_user.id, ticket_code, data.status)
+    if TICKET_ADAPTER == "http":
+        return ticket_request(
+            current_user, "PATCH", f"/tickets/{ticket_code}/status",
+            data.model_dump(mode="json"), idempotency_key=idempotency_key,
+        )
+    return ticket_service.update_ticket_status(db, current_user.id, ticket_code, data.status, idempotency_key)

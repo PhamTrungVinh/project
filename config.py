@@ -18,9 +18,19 @@ FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "faiss_index")
 RAG_ARTIFACT_URI = os.getenv("RAG_ARTIFACT_URI")
 RAG_ARTIFACT_VERSION = os.getenv("RAG_ARTIFACT_VERSION")
 RAG_CACHE_DIR = os.getenv("RAG_CACHE_DIR", ".rag-cache")
+KNOWLEDGE_ADAPTER = os.getenv("KNOWLEDGE_ADAPTER", "local").lower()
+KNOWLEDGE_SERVICE_URL = os.getenv("KNOWLEDGE_SERVICE_URL", "http://knowledge-rag:8001")
+KNOWLEDGE_SERVICE_TOKEN = os.getenv("KNOWLEDGE_SERVICE_TOKEN")
 CHECKPOINT_DATABASE_URL = os.getenv("CHECKPOINT_DATABASE_URL")
 HITL_ENABLED = os.getenv("HITL_ENABLED", "true").lower() in ("1", "true", "yes")
 LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+TICKET_ADAPTER = os.getenv("TICKET_ADAPTER", "local").lower()
+BOOKING_ADAPTER = os.getenv("BOOKING_ADAPTER", "local").lower()
+MEMORY_ADAPTER = os.getenv("MEMORY_ADAPTER", "local").lower()
+TICKET_SERVICE_URL = os.getenv("TICKET_SERVICE_URL", "http://ticket-service:8002")
+BOOKING_SERVICE_URL = os.getenv("BOOKING_SERVICE_URL", "http://booking-service:8003")
+MEMORY_SERVICE_URL = os.getenv("MEMORY_SERVICE_URL", "http://memory-service:8004")
+DOMAIN_SERVICE_TIMEOUT_SECONDS = float(os.getenv("DOMAIN_SERVICE_TIMEOUT_SECONDS", "5"))
 
 _llm = None
 _guardrail_llm = None
@@ -66,6 +76,21 @@ def validate_startup_configuration() -> None:
         raise RuntimeError("RAG_ARTIFACT_URI must use remote object storage outside local development")
     if "/" in RAG_ARTIFACT_VERSION or "\\" in RAG_ARTIFACT_VERSION:
         raise RuntimeError("RAG_ARTIFACT_VERSION must be a single version identifier")
+    if KNOWLEDGE_ADAPTER not in {"local", "http"}:
+        raise RuntimeError("KNOWLEDGE_ADAPTER must be 'local' or 'http'")
+    if KNOWLEDGE_ADAPTER == "http" and not KNOWLEDGE_SERVICE_TOKEN:
+        raise RuntimeError("KNOWLEDGE_SERVICE_TOKEN is required with the HTTP knowledge adapter")
+    domain_adapters = {
+        "TICKET_ADAPTER": TICKET_ADAPTER,
+        "BOOKING_ADAPTER": BOOKING_ADAPTER,
+        "MEMORY_ADAPTER": MEMORY_ADAPTER,
+    }
+    invalid_adapters = [name for name, adapter in domain_adapters.items() if adapter not in {"local", "http"}]
+    if invalid_adapters:
+        raise RuntimeError(f"Unsupported domain adapter setting: {', '.join(invalid_adapters)}")
+    for environment_key in ("TICKET_DATABASE_URL", "BOOKING_DATABASE_URL", "MEMORY_DATABASE_URL"):
+        if not os.getenv(environment_key):
+            raise RuntimeError(f"{environment_key} is required outside local development")
 
 
 def local_rag_paths() -> tuple[Path, Path]:

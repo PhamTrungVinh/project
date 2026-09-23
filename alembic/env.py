@@ -3,7 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 
 from database import Base, get_database_url
-from models import Booking, Conversation, EpisodicMemory, SemanticMemory, Ticket, User  # noqa: F401
+from models import Booking, Conversation, EpisodicMemory, IdempotencyRecord, PendingAction, SemanticMemory, Ticket, TicketAudit, TicketOutbox, User  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
