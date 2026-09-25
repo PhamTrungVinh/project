@@ -1,4 +1,5 @@
 import sqlite3
+import os
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -28,7 +29,7 @@ def build_checkpointer():
     global _postgres_checkpointer_context
     checkpoint_url = get_checkpoint_database_url()
     if checkpoint_url is None:
-        connection = sqlite3.connect("checkpoints.db", check_same_thread=False)
+        connection = sqlite3.connect(os.getenv("CHECKPOINT_SQLITE_PATH", "checkpoints.db"), check_same_thread=False)
         return SqliteSaver(connection)
 
     from langgraph.checkpoint.postgres import PostgresSaver

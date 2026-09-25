@@ -7,6 +7,14 @@ app.db
 checkpoints.db
 checkpoints.db-wal
 checkpoints.db-shm
+*_service.db
+*_service.db-wal
+*_service.db-shm
+events.db
+events.db-wal
+events.db-shm
+chat_checkpoints.db*
+local_data/
 log/
 faiss_index/
 .env

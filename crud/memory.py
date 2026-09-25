@@ -1,9 +1,11 @@
 import json
 import numpy as np
+from datetime import datetime, timezone
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from logger import db_logger
-from models.memory import SemanticMemory, EpisodicMemory
+from memory_service.models import SemanticMemory, EpisodicMemory
 
 
 def _cosine(a, b) -> float:
@@ -22,7 +24,11 @@ def save_fact(db: Session, owner_id: int, fact: str, embedding: list[float], exp
 
 
 def search_facts(db: Session, owner_id: int, query_embedding: list[float], top_k: int = 3) -> list[str]:
-    rows = db.query(SemanticMemory).filter(SemanticMemory.owner_id == owner_id).all()
+    now = datetime.now(timezone.utc)
+    rows = db.query(SemanticMemory).filter(
+        SemanticMemory.owner_id == owner_id,
+        or_(SemanticMemory.expires_at.is_(None), SemanticMemory.expires_at > now),
+    ).all()
     if not rows:
         db_logger.info("semantic_memory_searched owner_id=%s matches=0", owner_id)
         return []
@@ -50,7 +56,11 @@ def save_episode(db: Session, owner_id: int, thread_id: str, summary: str, outco
 
 
 def search_episodes(db: Session, owner_id: int, query_embedding: list[float], top_k: int = 3) -> list[dict]:
-    rows = db.query(EpisodicMemory).filter(EpisodicMemory.owner_id == owner_id).all()
+    now = datetime.now(timezone.utc)
+    rows = db.query(EpisodicMemory).filter(
+        EpisodicMemory.owner_id == owner_id,
+        or_(EpisodicMemory.expires_at.is_(None), EpisodicMemory.expires_at > now),
+    ).all()
     if not rows:
         db_logger.info("episodic_memory_searched owner_id=%s matches=0", owner_id)
         return []

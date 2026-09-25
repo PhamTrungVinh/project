@@ -1,6 +1,7 @@
 """Knowledge adapter with local and remote implementations."""
 
 from functools import lru_cache
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -9,6 +10,7 @@ from rag import build_rag_resources, hybrid_retrieve, hyde_query, mmr_select, re
 from services.ai_adapter import get_embeddings, get_raw_groq_client
 from shared_platform.api_contracts import KnowledgePassage, KnowledgeQueryRequest, KnowledgeQueryResponse
 from shared_platform.auth_claims import AuthClaims
+from logger import agent_logger
 
 RETRIEVAL_VERSION = "v1"
 UNAVAILABLE_MESSAGE = "Company-policy information is temporarily unavailable. Please try again later."
@@ -52,11 +54,23 @@ class HttpKnowledgeAdapter:
         headers = {"Content-Type": "application/json", "X-Correlation-ID": request.correlation_id}
         if KNOWLEDGE_SERVICE_TOKEN:
             headers["X-Internal-Service-Token"] = KNOWLEDGE_SERVICE_TOKEN
+        started = time.monotonic()
+        status_code = None
+        error_type = None
         try:
             with urlopen(Request(f"{KNOWLEDGE_SERVICE_URL.rstrip('/')}/v1/query", data=request.model_dump_json().encode(), headers=headers, method="POST"), timeout=5) as response:
+                status_code = response.status
                 return KnowledgeQueryResponse.model_validate_json(response.read())
-        except (HTTPError, URLError, TimeoutError, ValueError):
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            status_code = exc.code if isinstance(exc, HTTPError) else status_code
+            error_type = type(exc).__name__
             return KnowledgeQueryResponse(status="unavailable", retrieval_version=RETRIEVAL_VERSION, reason="knowledge_service_unavailable")
+        finally:
+            agent_logger.info(
+                "service_call target=knowledge-rag method=POST status=%s duration_ms=%s result=%s",
+                status_code, round((time.monotonic() - started) * 1000),
+                "error" if error_type else "ok",
+            )
 
 
 @lru_cache(maxsize=1)

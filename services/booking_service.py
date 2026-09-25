@@ -4,7 +4,7 @@ from datetime import timezone
 from sqlalchemy.orm import Session
 
 from crud import bookings as booking_crud
-from models.booking import Booking, BookingStatus
+from booking_service.models import Booking, BookingStatus
 from schemas.booking import BookingCreate, BookingUpdate, BookingOut
 from services.idempotency_service import execute as execute_idempotent
 
@@ -22,9 +22,9 @@ def _normalize_time(value):
 
 
 def _with_trusted_contact(db: Session, owner_id: int, data: BookingCreate, claims: AuthClaims | None) -> BookingCreate:
-    customer_name, email = identity_service.contact_for_owner(db, owner_id)
     if claims is not None:
-        return data.model_copy(update={"customer_name": claims.full_name, "email": claims.email})
+        return data.model_copy(update={"time": _normalize_time(data.time), "customer_name": claims.full_name, "email": claims.email})
+    customer_name, email = identity_service.contact_for_owner(db, owner_id)
     return data.model_copy(update={
         "time": _normalize_time(data.time),
         "customer_name": customer_name,

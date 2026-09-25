@@ -1,11 +1,12 @@
 from concurrent.futures import Future, ThreadPoolExecutor
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from database import get_db_session
 
 
 from crud import memory as memory_crud
-from models.memory import EpisodicMemory, SemanticMemory
+from memory_service.models import EpisodicMemory, SemanticMemory
 from services.ai_adapter import embed_text
 _recording_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory-recording")
 
@@ -24,8 +25,7 @@ def purge_expired(db: Session, owner_id: int) -> dict:
     now = datetime.now(timezone.utc)
     facts = db.query(SemanticMemory).filter(SemanticMemory.owner_id == owner_id, SemanticMemory.expires_at.is_not(None), SemanticMemory.expires_at <= now).delete()
     episodes = db.query(EpisodicMemory).filter(EpisodicMemory.owner_id == owner_id, EpisodicMemory.expires_at.is_not(None), EpisodicMemory.expires_at <= now).delete()
-    if facts or episodes:
-        db.commit()
+    db.commit()
     return {"facts_deleted": facts, "episodes_deleted": episodes}
 
 def remember_fact(db: Session, owner_id: int, fact: str, retention_days: int | None = None) -> None:
@@ -34,8 +34,11 @@ def remember_fact(db: Session, owner_id: int, fact: str, retention_days: int | N
 
 
 def recall_facts(db: Session, owner_id: int, query: str, top_k: int = 3) -> list[str]:
-    purge_expired(db, owner_id)
-    if db.query(SemanticMemory.id).filter(SemanticMemory.owner_id == owner_id).first() is None:
+    now = datetime.now(timezone.utc)
+    if db.query(SemanticMemory.id).filter(
+        SemanticMemory.owner_id == owner_id,
+        or_(SemanticMemory.expires_at.is_(None), SemanticMemory.expires_at > now),
+    ).first() is None:
         return []
     query_embedding = embed_text(query)
     return memory_crud.search_facts(db, owner_id, query_embedding, top_k=top_k)
@@ -47,8 +50,11 @@ def remember_episode(db: Session, owner_id: int, thread_id: str, summary: str, o
 
 
 def recall_episodes(db: Session, owner_id: int, query: str, top_k: int = 3) -> list[dict]:
-    purge_expired(db, owner_id)
-    if db.query(EpisodicMemory.id).filter(EpisodicMemory.owner_id == owner_id).first() is None:
+    now = datetime.now(timezone.utc)
+    if db.query(EpisodicMemory.id).filter(
+        EpisodicMemory.owner_id == owner_id,
+        or_(EpisodicMemory.expires_at.is_(None), EpisodicMemory.expires_at > now),
+    ).first() is None:
         return []
     query_embedding = embed_text(query)
     return memory_crud.search_episodes(db, owner_id, query_embedding, top_k=top_k)

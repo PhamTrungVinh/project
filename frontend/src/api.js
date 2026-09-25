@@ -4,6 +4,10 @@ export function getApiBase() {
   return localStorage.getItem("fpt_api_base") || DEFAULT_BASE;
 }
 
+export function getChatApiBase() {
+  return localStorage.getItem("fpt_chat_api_base") || import.meta.env.VITE_CHAT_API_BASE || getApiBase();
+}
+
 export function setApiBase(url) {
   localStorage.setItem("fpt_api_base", url);
 }
@@ -17,7 +21,7 @@ export function setToken(token) {
   else localStorage.removeItem("fpt_token");
 }
 
-export async function apiFetch(path, options = {}) {
+export async function apiFetch(path, options = {}, base = getApiBase()) {
   const token = getToken();
   const headers = { ...(options.headers || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -25,7 +29,7 @@ export async function apiFetch(path, options = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(getApiBase() + path, { ...options, headers });
+  const res = await fetch(base + path, { ...options, headers });
   const isJson = res.headers.get("content-type")?.includes("application/json");
   const data = isJson ? await res.json() : null;
 
@@ -53,10 +57,10 @@ export const authApi = {
 
 export const chatApi = {
   send: (message, thread_id) =>
-    apiFetch("/chat/", { method: "POST", body: JSON.stringify(thread_id ? { message, thread_id } : { message }) }),
-  listConversations: () => apiFetch("/chat/conversations"),
-  addFact: (fact) => apiFetch("/chat/memory/fact", { method: "POST", body: JSON.stringify({ fact }) }),
-  clearMemory: () => apiFetch("/chat/memory", { method: "DELETE" }),
+    apiFetch("/v1/chat/messages", { method: "POST", body: JSON.stringify(thread_id ? { message, thread_id } : { message }) }, getChatApiBase()),
+  listConversations: () => apiFetch("/v1/chat/conversations", {}, getChatApiBase()),
+  addFact: (fact) => apiFetch("/v1/memory/facts", { method: "POST", body: JSON.stringify({ fact }) }),
+  clearMemory: () => apiFetch("/v1/memory", { method: "DELETE" }),
 };
 
 export const ticketApi = {

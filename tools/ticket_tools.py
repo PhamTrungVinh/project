@@ -7,17 +7,26 @@ from logger import db_logger, agent_logger
 from database import get_db_session
 from services import identity_service, ticket_service
 from schemas.ticket import TicketCreate, TicketUpdate
-from models.ticket import TicketStatus
+from ticket_service.models import TicketStatus
 from utils.exceptions import NotFoundException, ConflictException
 from services.memory_service import remember_episode
 from services.date_service import format_local_datetime
 from services.domain_remote_adapter import domain_request_for_claims
+from services.domain_remote_adapter import record_memory_episode
 
 VALID_STATUSES = ["Pending", "Resolving", "Canceled", "Finished"]
 LOCKED_STATUSES = ("Finished", "Canceled")  # tickets in these statuses cannot be updated
 
 
 def build_ticket_tools(owner_id: int, thread_id: str, idempotency_key: str | None = None, claims=None) -> list:
+    remote = TICKET_ADAPTER == "http" and claims is not None
+
+    def episode(summary: str, outcome: str) -> None:
+        try:
+            record_memory_episode(claims, thread_id, summary, outcome)
+        except Exception as exc:
+            agent_logger.warning("remember_episode failed: %s", exc)
+
     @tool
     def create_ticket(
         content: str,
@@ -27,6 +36,17 @@ def build_ticket_tools(owner_id: int, thread_id: str, idempotency_key: str | Non
         email: Optional[str] = None,
     ) -> str:
         """..."""
+        if remote:
+            data = TicketCreate(content=content, description=description,
+                                customer_name=claims.full_name, customer_phone=customer_phone,
+                                email=claims.email)
+            ticket = domain_request_for_claims(
+                TICKET_SERVICE_URL, claims, "POST", "/tickets/",
+                data.model_dump(mode="json", exclude_none=True), idempotency_key=idempotency_key,
+            )
+            ticket_code = ticket["ticket_code"]
+            episode(f"Created ticket: {content}", f"ticket_code={ticket_code}, status=Pending")
+            return f"Created ticket {ticket_code}, status: Pending."
         with get_db_session() as db:
             profile_name, profile_email = identity_service.contact_for_owner(db, owner_id)
             data = TicketCreate(
@@ -64,14 +84,17 @@ def build_ticket_tools(owner_id: int, thread_id: str, idempotency_key: str | Non
         Returns full ticket info: content, description, status, customer_name,
         customer_phone, email, creation time.
         Only returns tickets that belong to the current user."""
-        with get_db_session() as db:
+        if remote:
             try:
-                if TICKET_ADAPTER == "http" and claims is not None:
-                    ticket = domain_request_for_claims(TICKET_SERVICE_URL, claims, "GET", f"/tickets/{ticket_code}")
-                else:
-                    ticket = ticket_service.get_ticket(db, owner_id, ticket_code)
-            except (NotFoundException, HTTPException):
+                ticket = domain_request_for_claims(TICKET_SERVICE_URL, claims, "GET", f"/tickets/{ticket_code}")
+            except HTTPException:
                 return f"Ticket not found with code {ticket_code}."
+        else:
+            with get_db_session() as db:
+                try:
+                    ticket = ticket_service.get_ticket(db, owner_id, ticket_code)
+                except NotFoundException:
+                    return f"Ticket not found with code {ticket_code}."
         if isinstance(ticket, dict):
             return (
                 f"ticket_code: {ticket['ticket_code']}\ncontent: {ticket['content']}\n"
@@ -101,6 +124,16 @@ def build_ticket_tools(owner_id: int, thread_id: str, idempotency_key: str | Non
         Valid status values: Pending, Resolving, Canceled, Finished.
         Email is auto-injected from context if not provided directly, but can be overridden."""
 
+        if remote:
+            data = TicketUpdate(content=content, description=description,
+                                customer_name=customer_name, customer_phone=customer_phone, email=email)
+            try:
+                domain_request_for_claims(TICKET_SERVICE_URL, claims, "PATCH", f"/tickets/{ticket_code}",
+                                          data.model_dump(mode="json", exclude_none=True), idempotency_key=idempotency_key)
+            except HTTPException as exc:
+                return str(exc.detail)
+            episode(f"Updated ticket {ticket_code}", "success")
+            return f"Updated ticket {ticket_code}."
         with get_db_session() as db:
             data = TicketUpdate(
                 content=content, description=description,
@@ -128,6 +161,17 @@ def build_ticket_tools(owner_id: int, thread_id: str, idempotency_key: str | Non
     def update_ticket_status(ticket_code: str, status: str) -> str:
         """Change a ticket's status. Valid values: Pending, Resolving, Canceled, Finished.
         Valid transitions: Pending -> Resolving -> Finished, or Canceled from Pending/Resolving."""
+        if remote:
+            try:
+                new_status = TicketStatus(status)
+            except ValueError:
+                return f"Invalid status: {status}. Must be one of Pending, Resolving, Canceled, Finished."
+            try:
+                domain_request_for_claims(TICKET_SERVICE_URL, claims, "PATCH", f"/tickets/{ticket_code}/status",
+                                          {"status": new_status.value}, idempotency_key=idempotency_key)
+            except HTTPException as exc:
+                return str(exc.detail)
+            return f"Ticket {ticket_code} status changed to {status}."
         with get_db_session() as db:
             try:
                 new_status = TicketStatus(status)

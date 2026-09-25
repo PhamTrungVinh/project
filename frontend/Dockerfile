@@ -11,6 +11,8 @@ COPY . .
 # Cho phép truyền API base URL lúc build (VD: khi frontend gọi qua domain khác localhost)
 ARG VITE_API_BASE=http://localhost:8000
 ENV VITE_API_BASE=$VITE_API_BASE
+ARG VITE_CHAT_API_BASE=
+ENV VITE_CHAT_API_BASE=$VITE_CHAT_API_BASE
 
 RUN npm run build
 

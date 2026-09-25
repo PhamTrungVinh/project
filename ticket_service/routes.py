@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_claims
-from models.ticket import TicketStatus
+from shared_platform.claims_dependency import get_current_claims
+from ticket_service.models import TicketStatus
 from schemas.ticket import TicketCreate, TicketOut, TicketStatusUpdate, TicketUpdate
 from services import ticket_service
 from shared_platform.auth_claims import AuthClaims

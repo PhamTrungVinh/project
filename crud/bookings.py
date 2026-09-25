@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from logger import db_logger
-from models.booking import Booking, BookingStatus
+from booking_service.models import Booking, BookingStatus
 from schemas.booking import BookingCreate, BookingUpdate
 from utils.exceptions import NotFoundException, ConflictException
 

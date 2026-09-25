@@ -2,7 +2,7 @@
 from datetime import datetime
 from pydantic import BaseModel
 
-from models.ticket import TicketStatus
+from ticket_service.models import TicketStatus
 
 
 class TicketCreate(BaseModel):

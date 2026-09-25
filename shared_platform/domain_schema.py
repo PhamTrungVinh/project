@@ -1,5 +1,7 @@
 """Create the small, owned schema used by each standalone local service."""
 
+from sqlalchemy import inspect
+
 from database import Base
 from shared_platform.domain_persistence import session_factory_for
 
@@ -26,3 +28,14 @@ def initialize_domain_schema(domain: str) -> None:
         bind=bind,
         tables=[Base.metadata.tables[name] for name in table_names],
     )
+    # create_all does not add columns to an existing local SQLite table.
+    # Keep previously created standalone domain DBs usable after Phase 6.
+    if bind.dialect.name == "sqlite" and domain in {"ticket", "booking"}:
+        outbox_table = f"{domain}_outbox"
+        existing = {column["name"] for column in inspect(bind).get_columns(outbox_table)}
+        with bind.begin() as connection:
+            for column in ("correlation_id", "causation_id"):
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {outbox_table} ADD COLUMN {column} VARCHAR(128)"
+                    )

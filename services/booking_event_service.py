@@ -5,7 +5,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from models.booking import Booking, BookingAudit, BookingOutbox
+from booking_service.models import Booking, BookingAudit, BookingOutbox
+from logger import request_id_context
 
 
 def record_change(
@@ -19,7 +20,6 @@ def record_change(
     """Persist audit history and an unpublished integration event atomically."""
     payload = {
         "booking_code": booking.booking_code,
-        "owner_id": booking.owner_id,
         "time": booking.time.isoformat(),
         "status": booking.status.value,
     }
@@ -38,5 +38,7 @@ def record_change(
             booking_id=booking.id,
             event_type=event_type,
             payload_json=json.dumps(payload, sort_keys=True, default=str),
+            correlation_id=request_id_context.get(),
+            causation_id=request_id_context.get(),
         )
     )

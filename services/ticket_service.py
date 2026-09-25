@@ -3,7 +3,7 @@
 from sqlalchemy.orm import Session
 
 from crud import tickets as ticket_crud
-from models.ticket import Ticket, TicketStatus
+from ticket_service.models import Ticket, TicketStatus
 from schemas.ticket import TicketCreate, TicketUpdate, TicketOut
 from shared_platform.auth_claims import AuthClaims
 from services.idempotency_service import execute as execute_idempotent
@@ -21,9 +21,9 @@ ALLOWED_STATUS_TRANSITIONS = {
 
 def _with_trusted_contact(db: Session, owner_id: int, data: TicketCreate, claims: AuthClaims | None) -> TicketCreate:
     """Use account identity for customer name/email, never request/LLM values."""
-    customer_name, email = identity_service.contact_for_owner(db, owner_id)
     if claims is not None:
         return data.model_copy(update={"customer_name": claims.full_name, "email": claims.email})
+    customer_name, email = identity_service.contact_for_owner(db, owner_id)
     return data.model_copy(update={"customer_name": customer_name, "email": email})
 
 

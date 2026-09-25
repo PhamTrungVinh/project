@@ -3,20 +3,15 @@
 Run with: ``uv run uvicorn booking_service.app:app --port 8003``.
 """
 
-from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from booking_service.routes import router as booking_router
 from utils.exceptions import AppException
-from shared_platform.domain_schema import initialize_domain_schema
+from shared_platform.request_context import request_context_middleware
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    initialize_domain_schema("booking")
-    yield
-
-app = FastAPI(title="Booking Service", version="v1", lifespan=lifespan)
+app = FastAPI(title="Booking Service", version="v1")
+app.middleware("http")(request_context_middleware)
 
 
 

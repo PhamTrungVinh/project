@@ -1,22 +1,17 @@
 """Standalone local entry point for the memory domain service."""
 
 from fastapi import Depends, FastAPI, status
-from contextlib import asynccontextmanager
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_claims
+from shared_platform.claims_dependency import get_current_claims
 from shared_platform.auth_claims import AuthClaims
 from schemas.chat import MemoryClearResponse, MemoryFactCreate, TaskOutcomeRequest
 from services import memory_service
-from shared_platform.domain_schema import initialize_domain_schema
+from shared_platform.request_context import request_context_middleware
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    initialize_domain_schema("memory")
-    yield
-
-app = FastAPI(title="Memory Service", version="v1", lifespan=lifespan)
+app = FastAPI(title="Memory Service", version="v1")
+app.middleware("http")(request_context_middleware)
 
 
 
@@ -54,4 +49,3 @@ def retrieve_context(query: str, db: Session = Depends(get_db), claims: AuthClai
 from shared_platform.domain_persistence import domain_dependency
 
 app.dependency_overrides[get_db] = domain_dependency("memory")
-

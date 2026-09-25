@@ -13,7 +13,7 @@ WORKDIR /app
 
 # Copy dependency files first to reuse the Docker build cache.
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 
 # Copy application code.
 COPY . .

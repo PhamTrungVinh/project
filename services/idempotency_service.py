@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 
 from sqlalchemy.orm import Session
 
-from models.idempotency import IdempotencyRecord
+from shared_platform.idempotency_model import IdempotencyRecord
 from utils.exceptions import ConflictException
 
 T = TypeVar("T")

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_claims
+from shared_platform.claims_dependency import get_current_claims
 from schemas.booking import BookingCreate, BookingOut, BookingUpdate
 from services import booking_service
 from shared_platform.auth_claims import AuthClaims

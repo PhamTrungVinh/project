@@ -87,7 +87,11 @@ def booking_confirm_node(state: AgentState) -> dict:
     thread_id = state.get("thread_id", "unknown")
     with get_db_session() as db:
         pending_action = pending_action_service.create(
-            db, owner_id, thread_id, "booking", sensitive_calls[0], question, DEFAULT_TTL_SECONDS
+            db, owner_id, thread_id, "booking", sensitive_calls[0], question, DEFAULT_TTL_SECONDS,
+            request_context={key: state.get(key) for key in (
+                "active_request", "requested_routes", "completed_routes",
+                "agent_responses", "hop_count", "last_completed_agent",
+            )},
         )
     tasks = add_task(
         state.get("unfinished_tasks", []),

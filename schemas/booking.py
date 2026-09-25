@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from pydantic import BaseModel, field_serializer
 
-from models.booking import BookingStatus
+from booking_service.models import BookingStatus
 
 
 class BookingCreate(BaseModel):

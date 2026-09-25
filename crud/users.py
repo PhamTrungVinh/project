@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from logger import db_logger
-from models.user import User
+from identity_service.models import User
 from schemas.user import UserCreate
 from utils.security import hash_password
 

@@ -10,6 +10,7 @@ from services.booking_service import build_chat_tools as build_booking_tools
 from database import get_db_session
 from crud.users import get_user_by_id
 from services.identity_service import claims_for_user
+from shared_platform.auth_claims import AuthClaims
 from langchain_core.messages import HumanMessage, ToolMessage
 
 SENSITIVE_TOOLS = {
@@ -62,12 +63,15 @@ def build_confirmation_response(tool_calls: list[dict], completed_results: list[
     return "Completed request:\n" + "\n\n".join(completed_results) + "\n\n" + question
 
 
-def _get_tool_map(agent: str, owner_id: int, thread_id: str, idempotency_key: str | None = None) -> dict:
-    with get_db_session() as db:
-        owner = get_user_by_id(db, owner_id)
-    if owner is None:
-        return {}
-    claims = claims_for_user(owner)
+def _get_tool_map(agent: str, owner_id: int, thread_id: str, idempotency_key: str | None = None, claims: AuthClaims | None = None) -> dict:
+    if claims is not None and claims.subject_id != owner_id:
+        raise ValueError("Confirmed action owner does not match authenticated claims")
+    if claims is None:
+        with get_db_session() as db:
+            owner = get_user_by_id(db, owner_id)
+        if owner is None:
+            return {}
+        claims = claims_for_user(owner)
 
     if agent == "ticket":
         tools = build_ticket_tools(owner_id, thread_id, idempotency_key, claims)
@@ -78,13 +82,17 @@ def _get_tool_map(agent: str, owner_id: int, thread_id: str, idempotency_key: st
     return {t.name: t for t in tools}
 
 
-def execute_confirmed_tool_call(agent: str, owner_id: int, thread_id: str, tool_call: dict, idempotency_key: str | None = None) -> str:
+def execute_confirmed_tool_call(agent: str, owner_id: int, thread_id: str, tool_call: dict, idempotency_key: str | None = None, *, raise_errors: bool = False, claims: AuthClaims | None = None) -> str:
     """Execute a tool call that the user confirmed through chat."""
-    tool_map = _get_tool_map(agent, owner_id, thread_id, idempotency_key)
+    tool_map = _get_tool_map(agent, owner_id, thread_id, idempotency_key, claims)
     tool = tool_map.get(tool_call["name"])
     if tool is None:
+        if raise_errors:
+            raise ValueError(f"Tool '{tool_call['name']}' not found")
         return f"Internal error: tool '{tool_call['name']}' not found."
     try:
         return tool.invoke(tool_call["args"])
     except Exception as e:
+        if raise_errors:
+            raise
         return f"Error executing action: {e}"

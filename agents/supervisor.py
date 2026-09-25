@@ -167,6 +167,21 @@ def supervisor_node(state: AgentState) -> dict:
         agent_logger.warning("SUPERVISOR decision failed: %s", e)
         return interrupted_response()
 
+    completed_routes = list(dict.fromkeys(state.get("completed_routes", [])))
+    unvisited_routes = [
+        route for route in state.get("requested_routes", [])
+        if route in VALID_ROUTES and route != current_route and route not in completed_routes
+    ]
+    if result.is_done and result.is_waiting_for_user and result.next_route in unvisited_routes:
+        # The current agent cannot ask on behalf of an agent that has not run.
+        # Let that agent produce the actual clarification question first.
+        if current_route in VALID_ROUTES and current_route not in completed_routes:
+            completed_routes.append(current_route)
+        agent_logger.info("SUPERVISOR visiting agent before waiting: %s", result.next_route)
+        return {"route": result.next_route, "hop_count": hop_count + 1,
+                "agent_responses": agent_responses, "completed_routes": completed_routes,
+                "last_completed_agent": current_route}
+
     if result.is_done and result.is_waiting_for_user:
         agent_logger.info(f"SUPERVISOR hop={hop_count} -> WAITING_FOR_USER, adding task for agent={result.next_route!r}")
         tasks = add_task(
@@ -177,6 +192,19 @@ def supervisor_node(state: AgentState) -> dict:
         return {"route": "done", "hop_count": 0, "agent_responses": agent_responses, "unfinished_tasks": tasks,
                 "messages": [AIMessage(content=turn_answer or last_ai)]}
 
+    if current_route in VALID_ROUTES and current_route not in completed_routes:
+        completed_routes.append(current_route)
+    unvisited_routes = [
+        route for route in state.get("requested_routes", [])
+        if route in VALID_ROUTES and route not in completed_routes
+    ]
+    if result.is_done and unvisited_routes:
+        next_route = unvisited_routes[0]
+        agent_logger.info("SUPERVISOR completing planned route before final answer: %s", next_route)
+        return {"route": next_route, "hop_count": hop_count + 1,
+                "agent_responses": agent_responses, "completed_routes": completed_routes,
+                "last_completed_agent": current_route}
+
     if result.is_done:
         answer = turn_answer or last_ai
         agent_logger.info(f"SUPERVISOR hop={hop_count} -> DONE")
@@ -185,7 +213,9 @@ def supervisor_node(state: AgentState) -> dict:
                 "messages": [AIMessage(content=answer)]}
 
     agent_logger.info(f"SUPERVISOR hop={hop_count} -> continue to {result.next_route}")
-    return {"route": result.next_route, "hop_count": hop_count + 1, "agent_responses": agent_responses}
+    return {"route": result.next_route, "hop_count": hop_count + 1,
+            "agent_responses": agent_responses, "completed_routes": completed_routes,
+            "last_completed_agent": current_route}
 
 
 def supervisor_decision(state: AgentState) -> str:

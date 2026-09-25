@@ -11,8 +11,10 @@ from sqlalchemy import text
 from database import engine
 from config import validate_startup_configuration
 from logger import app_logger, request_id_context
+from shared_platform.request_context import REQUEST_ID_PATTERN
 from utils.exceptions import AppException
 from routers import auth, users, tickets, bookings, chat
+from chat_orchestrator.routes import router as orchestrator_router
 from services.chat_service import get_app
 
 APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
@@ -42,7 +44,9 @@ app.add_middleware(
 @app.middleware("http")
 async def request_observability(request: Request, call_next):
     """Attach a request ID, emit a structured completion record, and count requests."""
-    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    supplied = request.headers.get("X-Request-ID", "")
+    request_id = supplied if REQUEST_ID_PATTERN.fullmatch(supplied) else uuid.uuid4().hex
+    request.state.correlation_id = request_id
     token = request_id_context.set(request_id)
     started = time.perf_counter()
     try:
@@ -126,3 +130,4 @@ app.include_router(users.router)
 app.include_router(tickets.router)
 app.include_router(bookings.router)
 app.include_router(chat.router)
+app.include_router(orchestrator_router)

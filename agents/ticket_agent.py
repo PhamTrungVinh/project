@@ -55,7 +55,7 @@ def ticket_agent_node(state: AgentState) -> dict:
         if active_request:
             system_content += (
                 "\n\nActive parent request: " + active_request
-                + "\nComplete only the ticket work in this request. Do not create, update, cancel, or ask for details about bookings; the booking agent handles those separately."
+                + "\nComplete only the ticket work in this request. Do not create, update, cancel, or ask for details about bookings. Do not mention bookings in your reply; the supervisor handles the other requested work."
             )
         if memory_context:
             system_content += f"\n\n{memory_context}"
@@ -96,7 +96,11 @@ def ticket_confirm_node(state: AgentState) -> dict:
     thread_id = state.get("thread_id", "unknown")
     with get_db_session() as db:
         pending_action = pending_action_service.create(
-            db, owner_id, thread_id, "ticket", sensitive_calls[0], question, DEFAULT_TTL_SECONDS
+            db, owner_id, thread_id, "ticket", sensitive_calls[0], question, DEFAULT_TTL_SECONDS,
+            request_context={key: state.get(key) for key in (
+                "active_request", "requested_routes", "completed_routes",
+                "agent_responses", "hop_count", "last_completed_agent",
+            )},
         )
     tasks = add_task(
         state.get("unfinished_tasks", []),

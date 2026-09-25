@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from logger import db_logger
-from models.conversation import Conversation
+from chat_orchestrator.conversation_model import Conversation
 from utils.exceptions import ForbiddenException, NotFoundException
 
 

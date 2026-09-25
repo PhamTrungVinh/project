@@ -5,28 +5,12 @@ from sqlalchemy.orm import Session
 from database import get_db
 from utils.security import decode_access_token
 from utils.exceptions import UnauthorizedException
-from shared_platform.auth_claims import AuthClaims
+from shared_platform.claims_dependency import get_current_claims
 from crud.users import get_user_by_id
-from models.user import User
+from identity_service.models import User
 from logger import app_logger
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
-
-def get_current_claims(token: str = Depends(oauth2_scheme)) -> AuthClaims:
-    """Validate a JWT without reading the identity database."""
-    payload = decode_access_token(token)
-    if payload is None:
-        raise UnauthorizedException()
-    try:
-        subject_id = int(payload["sub"])
-    except (KeyError, TypeError, ValueError):
-        raise UnauthorizedException()
-    return AuthClaims(
-        subject_id=subject_id,
-        email=payload.get("email"),
-        full_name=payload.get("name"),
-    )
-
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),

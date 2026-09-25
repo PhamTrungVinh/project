@@ -2,6 +2,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.supervisor import SupervisorDecision, supervisor_node
 from agents.rag_agent import rag_agent_node
+from guardrail import guardrail_node
 
 
 class _SupervisorLlm:
@@ -99,6 +100,49 @@ def test_supervisor_continues_booking_after_natural_language_ticket_result(monke
     assert result["hop_count"] == 1
 
 
+def test_supervisor_overrides_premature_done_for_unvisited_booking(monkeypatch):
+    llm = _SupervisorLlm(SupervisorDecision(
+        is_done=True, final_answer="Ticket is pending. Contact the booking agent separately."
+    ))
+    monkeypatch.setattr("agents.supervisor.get_chat_llm", lambda: llm)
+    result = supervisor_node({
+        "active_request": "i want to make a booking and track ticket TCK-A437C486",
+        "requested_routes": ["ticket", "booking"],
+        "completed_routes": [],
+        "route": "ticket",
+        "messages": [
+            HumanMessage(content="i want to make a booking and track ticket TCK-A437C486"),
+            AIMessage(content="Ticket TCK-A437C486 is pending. Contact the booking agent separately."),
+        ],
+    })
+    assert result["route"] == "booking"
+    assert result["completed_routes"] == ["ticket"]
+    assert result["hop_count"] == 1
+    assert "Contact the booking agent" not in str(result.get("messages", ""))
+
+
+def test_supervisor_visits_booking_before_waiting_for_its_details(monkeypatch):
+    llm = _SupervisorLlm(SupervisorDecision(
+        is_done=True, is_waiting_for_user=True, next_route="booking",
+        final_answer="What reason and time would you like for the booking?",
+    ))
+    monkeypatch.setattr("agents.supervisor.get_chat_llm", lambda: llm)
+    result = supervisor_node({
+        "active_request": "i want to make a booking and track ticket TCK-A437C486",
+        "requested_routes": ["ticket", "booking"],
+        "completed_routes": [],
+        "route": "ticket",
+        "messages": [
+            HumanMessage(content="i want to make a booking and track ticket TCK-A437C486"),
+            AIMessage(content="Ticket TCK-A437C486 is pending. Let me know if you need updates."),
+        ],
+    })
+    assert result["route"] == "booking"
+    assert result["completed_routes"] == ["ticket"]
+    assert result.get("unfinished_tasks") is None
+    assert result.get("messages") is None
+
+
 def test_supervisor_accepts_completed_named_ticket_tracking(monkeypatch):
     llm = _SupervisorLlm(
         SupervisorDecision(is_done=True, final_answer="Combined results")
@@ -158,6 +202,21 @@ def test_router_uses_model_plan_for_informal_booking_request(monkeypatch):
     assert query in llm.prompt
 
 
+def test_router_keeps_explicit_booking_when_model_omits_it(monkeypatch):
+    from contextlib import nullcontext
+    from agents.router import RouteDecision, router_node
+
+    llm = _SupervisorLlm(RouteDecision(route="ticket", requested_routes=["ticket"]))
+    monkeypatch.setattr("agents.router.get_chat_llm", lambda: llm)
+    monkeypatch.setattr("agents.router.get_db_session", lambda: nullcontext(None))
+    monkeypatch.setattr("agents.router.pending_action_service.active_tasks", lambda *_: [])
+    query = "i want to make a booking and track ticket TCK-A437C486"
+    result = router_node({"user_name": "1", "messages": [HumanMessage(content=query)]})
+
+    assert result["route"] == "ticket"
+    assert result["requested_routes"] == ["ticket", "booking"]
+
+
 def test_supervisor_preserves_results_when_waiting_for_booking_details(monkeypatch):
     llm = _SupervisorLlm(SupervisorDecision(
         is_done=True, is_waiting_for_user=True, next_route="booking",
@@ -184,6 +243,8 @@ def test_supervisor_hop_limit_preserves_unfinished_request():
     assert "couldn't finish all parts" in result["messages"][0].content
     assert "active_request" not in result
     assert result["unfinished_tasks"]
+    assert guardrail_node({"messages": [HumanMessage(content="continue")],
+                           "unfinished_tasks": result["unfinished_tasks"]})["blocked"] is False
 
 
 def test_confirmed_booking_result_supersedes_old_question(monkeypatch):
@@ -197,7 +258,8 @@ def test_confirmed_booking_result_supersedes_old_question(monkeypatch):
     monkeypatch.setattr("agents.supervisor.get_chat_llm", lambda: llm)
     result = supervisor_node({
         "active_request": query, "route": "confirmed", "last_completed_agent": "booking",
-        "requested_routes": ["ticket", "booking"], "unfinished_tasks": [],
+        "requested_routes": ["ticket", "booking"], "completed_routes": ["ticket"],
+        "unfinished_tasks": [],
         "agent_responses": ["Ticket TCK-5CDFD957 is pending.", question],
         "messages": [
             HumanMessage(content="An unrelated older request"),

@@ -9,7 +9,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from models.ticket import Ticket, TicketAudit, TicketOutbox
+from ticket_service.models import Ticket, TicketAudit, TicketOutbox
+from logger import request_id_context
 
 
 def record_change(
@@ -24,7 +25,6 @@ def record_change(
     """Persist the ticket audit record and matching integration event."""
     payload = {
         "ticket_code": ticket.ticket_code,
-        "owner_id": ticket.owner_id,
         "status": ticket.status.value,
     }
     if details:
@@ -43,5 +43,7 @@ def record_change(
             ticket_id=ticket.id,
             event_type=event_type,
             payload_json=json.dumps(payload, sort_keys=True, default=str),
+            correlation_id=request_id_context.get(),
+            causation_id=request_id_context.get(),
         )
     )

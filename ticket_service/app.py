@@ -3,20 +3,15 @@
 Run with: ``uv run uvicorn ticket_service.app:app --port 8002``.
 """
 
-from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from ticket_service.routes import router as ticket_router
 from utils.exceptions import AppException
-from shared_platform.domain_schema import initialize_domain_schema
+from shared_platform.request_context import request_context_middleware
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    initialize_domain_schema("ticket")
-    yield
-
-app = FastAPI(title="Ticket Service", version="v1", lifespan=lifespan)
+app = FastAPI(title="Ticket Service", version="v1")
+app.middleware("http")(request_context_middleware)
 
 
 

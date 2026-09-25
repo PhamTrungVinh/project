@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from logger import db_logger
-from models.ticket import Ticket, TicketStatus
+from ticket_service.models import Ticket, TicketStatus
 from schemas.ticket import TicketCreate, TicketUpdate
 from utils.exceptions import NotFoundException, ConflictException
 

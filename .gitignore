@@ -14,8 +14,16 @@ wheels/
 log/
 checkpoints.db
 app.db
+chat_service.db
+chat_checkpoints.db
+identity_service.db
+ticket_service.db
+booking_service.db
+memory_service.db
+events.db
 FSoft_HR.pdf
 
 alembic/versions/__pycache__/
 
 .rag-cache/
+local_data/

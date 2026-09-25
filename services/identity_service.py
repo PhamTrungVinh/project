@@ -1,4 +1,4 @@
-from models.user import User
+from identity_service.models import User
 from shared_platform.auth_claims import AuthClaims
 
 def claims_for_user(user: User) -> AuthClaims:
