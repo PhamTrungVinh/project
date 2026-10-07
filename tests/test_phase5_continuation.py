@@ -87,6 +87,7 @@ def test_standalone_app_exposes_chat_and_health(
 
     orchestrator_app.app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(orchestrator_app, "get_app", lambda: object())
+    monkeypatch.setattr(orchestrator_app, "get_knowledge_adapter", lambda: object())
     monkeypatch.setattr(routes.chat_service, "send_message", lambda db, user, thread, message: {
         "answer": "Hello", "route": "it_support", "thread_id": thread,
     })

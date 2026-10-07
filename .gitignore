@@ -27,3 +27,4 @@ alembic/versions/__pycache__/
 
 .rag-cache/
 local_data/
+backups/

@@ -1,4 +1,16 @@
-const DEFAULT_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+import { readChatEvents } from "./sse.js";
+
+const DEFAULT_BASE = import.meta.env.VITE_API_BASE || "/api";
+
+// Retire saved URLs for the old local gateway when using the same-origin build.
+if (DEFAULT_BASE === "/api") {
+  for (const key of ["fpt_api_base", "fpt_chat_api_base"]) {
+    const saved = localStorage.getItem(key);
+    if (saved && /^https?:\/\/(localhost|127\.0\.0\.1):(8000|8005|8080)\/?$/.test(saved)) {
+      localStorage.removeItem(key);
+    }
+  }
+}
 
 export function getApiBase() {
   return localStorage.getItem("fpt_api_base") || DEFAULT_BASE;
@@ -56,9 +68,32 @@ export const authApi = {
 };
 
 export const chatApi = {
+  stream: async (message, thread_id, onEvent, signal) => {
+    const token = getToken();
+    const response = await fetch(getChatApiBase() + "/v1/chat/messages/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json", "Accept": "text/event-stream",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(thread_id ? { message, thread_id } : { message }),
+      signal,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const detail = data?.detail || response.statusText;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+    if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+      throw new Error("Expected a chat event stream");
+    }
+    return readChatEvents(response.body, onEvent);
+  },
   send: (message, thread_id) =>
     apiFetch("/v1/chat/messages", { method: "POST", body: JSON.stringify(thread_id ? { message, thread_id } : { message }) }, getChatApiBase()),
-  listConversations: () => apiFetch("/v1/chat/conversations", {}, getChatApiBase()),
+  listConversations: (skip = 0, limit = 50) => apiFetch(`/v1/chat/conversations?skip=${skip}&limit=${limit}`, {}, getChatApiBase()),
+  history: (thread_id, signal) => apiFetch(`/v1/chat/conversations/${encodeURIComponent(thread_id)}/messages`, { signal }, getChatApiBase()),
+  deleteConversation: (thread_id) => apiFetch(`/v1/chat/conversations/${encodeURIComponent(thread_id)}`, { method: "DELETE" }, getChatApiBase()),
   addFact: (fact) => apiFetch("/v1/memory/facts", { method: "POST", body: JSON.stringify({ fact }) }),
   clearMemory: () => apiFetch("/v1/memory", { method: "DELETE" }),
 };

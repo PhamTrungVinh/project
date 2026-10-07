@@ -4,10 +4,11 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 
 from confirmation import execute_confirmed_tool_call
-from database import get_db
+from database import get_db, get_db_session
 from dependencies import get_current_claims
 from shared_platform.auth_claims import AuthClaims
 from schemas.chat import (
@@ -17,7 +18,9 @@ from schemas.chat import (
 from services import chat_orchestration_service as chat_service, pending_action_service
 from services.thread_lock import thread_turn_lock
 from crud import conversation as conv_crud
-from schemas.chat import ConversationOut
+from schemas.chat import ConversationOut, ConversationHistoryOut
+from services.conversation_history_service import get_conversation_history, delete_conversation
+from services.chat_stream_service import stream_turn
 
 
 router = APIRouter(prefix="/v1", tags=["chat-orchestrator"])
@@ -29,6 +32,24 @@ def list_conversations(
     db: Session = Depends(get_db), current_user: AuthClaims = Depends(get_current_claims),
 ):
     return conv_crud.list_conversations(db, current_user.id, skip=skip, limit=limit)
+
+
+@router.get("/chat/conversations/{thread_id}/messages", response_model=ConversationHistoryOut)
+def conversation_history(
+    thread_id: str, db: Session = Depends(get_db),
+    current_user: AuthClaims = Depends(get_current_claims),
+):
+    conversation, history = get_conversation_history(db, current_user.id, thread_id)
+    return ConversationHistoryOut(**ConversationOut.model_validate(conversation).model_dump(), **history)
+
+
+@router.delete("/chat/conversations/{thread_id}", status_code=204, response_class=Response)
+def remove_conversation(
+    thread_id: str, db: Session = Depends(get_db),
+    current_user: AuthClaims = Depends(get_current_claims),
+):
+    delete_conversation(db, current_user.id, thread_id)
+    return Response(status_code=204)
 
 
 def _correlation_id(request: Request) -> str:
@@ -51,6 +72,36 @@ def send_message(
             for action in pending
         ],
         correlation_id=_correlation_id(request),
+    )
+
+
+@router.post("/chat/messages/stream", response_class=StreamingResponse,
+             responses={200: {"content": {"text/event-stream": {}}}})
+def stream_message(
+    data: ChatMessageRequest, request: Request,
+    db: Session = Depends(get_db, scope="function"), current_user: AuthClaims = Depends(get_current_claims),
+):
+    thread_id = data.thread_id or f"session-{uuid.uuid4().hex}"
+    # Reject known ownership violations before sending streaming response headers.
+    if conv_crud.get_conversation(db, thread_id) is not None:
+        conv_crud.get_user_conversation(db, current_user.id, thread_id)
+    correlation_id = _correlation_id(request)
+
+    def run_turn(on_delta):
+        # The request dependency may be closed before streaming finishes.
+        with get_db_session() as worker_db:
+            result = chat_service.send_message(worker_db, current_user, thread_id,
+                                               data.message, on_delta=on_delta)
+            pending = pending_action_service.pending_for_thread(worker_db, current_user.id, thread_id)
+            return ChatMessageResponse(
+                **result, correlation_id=correlation_id,
+                pending_actions=[PendingActionOut(id=action.id, agent=action.agent,
+                    question=action.question, expires_at=action.expires_at) for action in pending],
+            )
+
+    return StreamingResponse(
+        stream_turn(run_turn, thread_id, correlation_id), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 

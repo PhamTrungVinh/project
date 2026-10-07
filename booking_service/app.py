@@ -28,9 +28,4 @@ def health():
 @app.get("/ready")
 def ready():
     return {"status": "ready"}
-from database import get_db
-from shared_platform.domain_persistence import domain_dependency
-
-app.dependency_overrides[get_db] = domain_dependency("booking")
-
 app.include_router(booking_router)

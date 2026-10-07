@@ -11,6 +11,7 @@ from services.ai_adapter import get_embeddings, get_raw_groq_client
 from shared_platform.api_contracts import KnowledgePassage, KnowledgeQueryRequest, KnowledgeQueryResponse
 from shared_platform.auth_claims import AuthClaims
 from logger import agent_logger
+from services.answer_stream import get_answer_writer
 
 RETRIEVAL_VERSION = "v1"
 UNAVAILABLE_MESSAGE = "Company-policy information is temporarily unavailable. Please try again later."
@@ -23,10 +24,15 @@ def _citations(passages: list[KnowledgePassage]) -> list[str]:
 class LocalKnowledgeAdapter:
     """Local compatibility adapter; preload it before accepting traffic."""
 
+    # None retains lazy loading for legacy callers.
+    startup_status: str | None = None
+
     def preload(self) -> None:
         build_rag_resources()
 
     def query(self, request: KnowledgeQueryRequest) -> KnowledgeQueryResponse:
+        if self.startup_status in {"loading", "unavailable"}:
+            return KnowledgeQueryResponse(status="unavailable", reason="retrieval_dependency_unavailable")
         if request.approved_index_version and request.approved_index_version != RAG_ARTIFACT_VERSION:
             return KnowledgeQueryResponse(status="unavailable", retrieval_version=RETRIEVAL_VERSION, index_version=RAG_ARTIFACT_VERSION, reason="requested_index_version_is_not_active")
         try:
@@ -43,10 +49,26 @@ class LocalKnowledgeAdapter:
         passages = [KnowledgePassage(content=doc.page_content, source=str(doc.metadata.get("source", "FSoft_HR.pdf")), page=(int(doc.metadata["page"]) + 1 if doc.metadata.get("page") is not None else None), score=1.0 / (rank + 1)) for rank, doc in enumerate(docs)]
         context = "\n\n".join(f"[Source: {p.source}, page {p.page or 'unknown'}]\n{p.content}" for p in passages)
         try:
-            completion = client.chat.completions.create(model="openai/gpt-oss-120b", messages=[{"role": "system", "content": "Only answer using the provided company-policy context. Say information is unavailable when context is insufficient."}, {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{request.query}"}])
+            messages = [{"role": "system", "content": "Only answer using the provided company-policy context. Say information is unavailable when context is insufficient."}, {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{request.query}"}]
+            writer = get_answer_writer()
+            if writer is None:
+                completion = client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
+                answer = completion.choices[0].message.content
+            else:
+                chunks = []
+                stream = client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, stream=True)
+                try:
+                    for chunk in stream:
+                        text = chunk.choices[0].delta.content if chunk.choices else None
+                        if text:
+                            chunks.append(text)
+                            writer(text)
+                finally:
+                    stream.close()
+                answer = "".join(chunks)
         except Exception:
             return KnowledgeQueryResponse(status="degraded", passages=passages, citations=_citations(passages), retrieval_version=RETRIEVAL_VERSION, index_version=RAG_ARTIFACT_VERSION, reason="answer_generation_unavailable")
-        return KnowledgeQueryResponse(status="ok", answer=completion.choices[0].message.content, passages=passages, citations=_citations(passages), retrieval_version=RETRIEVAL_VERSION, index_version=RAG_ARTIFACT_VERSION)
+        return KnowledgeQueryResponse(status="ok", answer=answer, passages=passages, citations=_citations(passages), retrieval_version=RETRIEVAL_VERSION, index_version=RAG_ARTIFACT_VERSION)
 
 
 class HttpKnowledgeAdapter:

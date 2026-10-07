@@ -60,6 +60,18 @@ class ConversationOut(BaseModel):
         from_attributes = True
 
 
+class ConversationMessageOut(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    text: str
+
+
+class ConversationHistoryOut(ConversationOut):
+    messages: list[ConversationMessageOut]
+    route: str = ""
+    history_available: bool = True
+
+
 class TaskOutcomeRequest(BaseModel):
     thread_id: str
     summary: str

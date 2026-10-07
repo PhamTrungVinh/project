@@ -58,22 +58,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
 
     @app.post("/v1/events", dependencies=[Depends(authorize)])
     def receive(event: EventEnvelope, db: Session = Depends(get_db)):
-        encoded = json.dumps(event.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-        existing = db.get(EventInbox, event.event_id)
-        if existing is not None:
-            if existing.envelope_json != encoded:
-                raise HTTPException(status_code=409, detail="Event ID already has different content")
-            return {"status": "duplicate", "event_id": event.event_id}
-        db.add(EventInbox(event_id=event.event_id, envelope_json=encoded))
-        try:
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            existing = db.get(EventInbox, event.event_id)
-            if existing is None or existing.envelope_json != encoded:
-                raise HTTPException(status_code=409, detail="Event ID already has different content")
-            return {"status": "duplicate", "event_id": event.event_id}
-        return {"status": "accepted", "event_id": event.event_id}
+        from services.event_inbox_service import receive_event
+        return receive_event(db, event)
 
     @app.get("/v1/events/{event_id}", dependencies=[Depends(authorize)])
     def get_event(event_id: str, db: Session = Depends(get_db)):

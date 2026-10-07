@@ -1,4 +1,6 @@
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+import os
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
@@ -8,7 +10,21 @@ from database import get_db_session
 from crud import memory as memory_crud
 from memory_service.models import EpisodicMemory, SemanticMemory
 from services.ai_adapter import embed_text
+from shared_platform.domain_persistence import domain_session
 _recording_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="memory-recording")
+
+
+@contextmanager
+def memory_session(fallback: Session | None = None):
+    """Use the owned memory store when configured; retain monolith compatibility."""
+    if os.getenv("MEMORY_DATABASE_URL"):
+        with domain_session("memory") as db:
+            yield db
+    elif fallback is not None:
+        yield fallback
+    else:
+        with get_db_session() as db:
+            yield db
 
 
 
@@ -83,7 +99,7 @@ def clear_all_memory(db: Session, owner_id: int) -> dict:
 def record_episode_async(owner_id: int, thread_id: str, summary: str, outcome: str, retention_days: int | None = None) -> Future:
     """Record a completed interaction without blocking the chat request."""
     def _record() -> None:
-        with get_db_session() as db:
+        with memory_session() as db:
             remember_episode(db, owner_id, thread_id, summary, outcome, retention_days)
 
     return _recording_executor.submit(_record)

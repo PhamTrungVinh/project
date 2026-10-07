@@ -15,6 +15,10 @@ events.db-wal
 events.db-shm
 chat_checkpoints.db*
 local_data/
+backups/
+.aws/
+.codex/
+.agents/
 log/
 faiss_index/
 .env

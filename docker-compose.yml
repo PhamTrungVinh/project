@@ -11,161 +11,110 @@ x-common-env: &common-env
   TAVILY_API_KEY: ${TAVILY_API_KEY:-}
 
 services:
-  identity-service:
-    <<: *service
-    command: sh -c "./.venv/bin/python -m scripts.migrate_service identity && exec ./.venv/bin/uvicorn identity_service.app:app --host 0.0.0.0 --port 8007"
-    environment:
-      <<: *common-env
-      IDENTITY_DATABASE_URL: sqlite:////data/identity_service.db
-    volumes:
-      - ./local_data/identity:/data
-
-  ticket-service:
-    <<: *service
-    command: sh -c "./.venv/bin/python -m scripts.migrate_service ticket && exec ./.venv/bin/uvicorn ticket_service.app:app --host 0.0.0.0 --port 8002"
-    environment:
-      <<: *common-env
-      TICKET_DATABASE_URL: sqlite:////data/ticket_service.db
-    volumes:
-      - ./local_data/ticket:/data
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/ready', timeout=2)"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 12
 
-  booking-service:
-    <<: *service
-    command: sh -c "./.venv/bin/python -m scripts.migrate_service booking && exec ./.venv/bin/uvicorn booking_service.app:app --host 0.0.0.0 --port 8003"
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
     environment:
-      <<: *common-env
-      BOOKING_DATABASE_URL: sqlite:////data/booking_service.db
+      POSTGRES_USER: ${POSTGRES_USER:-support}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ./local_data/booking:/data
+      - postgres17_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/ready', timeout=2)"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d postgres"]
       interval: 5s
       timeout: 3s
       retries: 12
+      start_period: 10s
 
-  memory-service:
+  business-backend:
     <<: *service
-    command: sh -c "./.venv/bin/python -m scripts.migrate_service memory && exec ./.venv/bin/uvicorn memory_service.app:app --host 0.0.0.0 --port 8004"
+    command: sh -c "./.venv/bin/python -m scripts.migrate_service identity && ./.venv/bin/python -m scripts.migrate_service ticket && ./.venv/bin/python -m scripts.migrate_service booking && ./.venv/bin/python -m scripts.migrate_service event && exec ./.venv/bin/uvicorn business_backend.app:app --host 0.0.0.0 --port 8000 --forwarded-allow-ips=\"*\""
     environment:
       <<: *common-env
-      MEMORY_DATABASE_URL: sqlite:////data/memory_service.db
-    volumes:
-      - ./local_data/memory:/data
-      - hf_cache:/app/.cache/huggingface
-
-  event-service:
-    <<: *service
-    command: sh -c "./.venv/bin/python -m scripts.migrate_service event && exec ./.venv/bin/uvicorn event_service.app:app --host 0.0.0.0 --port 8006"
-    environment:
-      <<: *common-env
-      EVENT_DATABASE_URL: sqlite:////data/events.db
-      EVENT_SERVICE_TOKEN: ${EVENT_SERVICE_TOKEN:-local-event-token}
-    volumes:
-      - ./local_data/event:/data
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/health', timeout=2)"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-
-  event-worker:
-    <<: *service
-    command: ./.venv/bin/python -m scripts.run_outbox_worker
-    environment:
-      <<: *common-env
-      OUTBOX_TICKET_DATABASE_URL: sqlite:////ticket-data/ticket_service.db
-      OUTBOX_BOOKING_DATABASE_URL: sqlite:////booking-data/booking_service.db
-      EVENT_SERVICE_URL: http://event-service:8006
-      EVENT_SERVICE_TOKEN: ${EVENT_SERVICE_TOKEN:-local-event-token}
-    volumes:
-      - ./local_data/ticket:/ticket-data
-      - ./local_data/booking:/booking-data
+      IDENTITY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/identity
+      TICKET_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/ticket
+      BOOKING_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/booking
+      EVENT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/event
+      OUTBOX_WORKER_ENABLED: "true"
+      OUTBOX_POLL_SECONDS: "5"
     depends_on:
-      ticket-service:
+      postgres:
         condition: service_healthy
-      booking-service:
-        condition: service_healthy
-      event-service:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
-  knowledge-rag:
+  chat-orchestrator:
     <<: *service
-    command: ./.venv/bin/uvicorn knowledge_api:app --host 0.0.0.0 --port 8001
+    command: sh -c "./.venv/bin/python -m scripts.migrate_service chat && ./.venv/bin/python -m scripts.migrate_service memory && exec ./.venv/bin/uvicorn chat_orchestrator.app:app --host 0.0.0.0 --port 8005 --forwarded-allow-ips=\"*\""
     environment:
       <<: *common-env
-      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:-local-knowledge-token}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/chat
+      CHAT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/chat
+      CHECKPOINT_DATABASE_URL: postgresql://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/checkpoints
+      MEMORY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-support}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/memory
+      REDIS_URL: redis://redis:6379/0
       PDF_PATH: /app/FSoft_HR.pdf
       FAISS_INDEX_PATH: /app/faiss_index
       RAG_ARTIFACT_URI: ${RAG_ARTIFACT_URI:-}
       RAG_ARTIFACT_VERSION: ${RAG_ARTIFACT_VERSION:-}
+      TICKET_ADAPTER: http
+      BOOKING_ADAPTER: http
+      MEMORY_ADAPTER: local
+      KNOWLEDGE_ADAPTER: local
+      TICKET_SERVICE_URL: http://business-backend:8000
+      BOOKING_SERVICE_URL: http://business-backend:8000
+      HITL_ENABLED: ${HITL_ENABLED:-true}
     volumes:
       - ./FSoft_HR.pdf:/app/FSoft_HR.pdf:ro
       - faiss_data:/app/faiss_index
       - hf_cache:/app/.cache/huggingface
-
-  chat-orchestrator:
-    <<: *service
-    command: sh -c "./.venv/bin/python -m scripts.migrate_service chat && exec ./.venv/bin/uvicorn chat_orchestrator.app:app --host 0.0.0.0 --port 8005"
-    environment:
-      <<: *common-env
-      DATABASE_URL: sqlite:////data/chat_service.db
-      CHAT_DATABASE_URL: sqlite:////data/chat_service.db
-      CHECKPOINT_SQLITE_PATH: /data/chat_checkpoints.db
-      TICKET_ADAPTER: http
-      BOOKING_ADAPTER: http
-      MEMORY_ADAPTER: http
-      KNOWLEDGE_ADAPTER: http
-      TICKET_SERVICE_URL: http://ticket-service:8002
-      BOOKING_SERVICE_URL: http://booking-service:8003
-      MEMORY_SERVICE_URL: http://memory-service:8004
-      KNOWLEDGE_SERVICE_URL: http://knowledge-rag:8001
-      KNOWLEDGE_SERVICE_TOKEN: ${KNOWLEDGE_SERVICE_TOKEN:-local-knowledge-token}
-      HITL_ENABLED: ${HITL_ENABLED:-true}
-    volumes:
-      - ./local_data/chat:/data
     depends_on:
-      - identity-service
-      - ticket-service
-      - booking-service
-      - memory-service
-      - knowledge-rag
-
-  gateway:
-    <<: *service
-    command: ./.venv/bin/uvicorn gateway.app:app --host 0.0.0.0 --port 8080
-    ports:
-      - "8080:8080"
-    environment:
-      <<: *common-env
-      GATEWAY_BACKEND_URL: http://chat-orchestrator:8005
-      GATEWAY_IDENTITY_URL: http://identity-service:8007
-      GATEWAY_CHAT_URL: http://chat-orchestrator:8005
-      GATEWAY_TICKET_URL: http://ticket-service:8002
-      GATEWAY_BOOKING_URL: http://booking-service:8003
-      GATEWAY_MEMORY_URL: http://memory-service:8004
-    depends_on:
-      - identity-service
-      - chat-orchestrator
-      - ticket-service
-      - booking-service
-      - memory-service
+      postgres:
+        condition: service_healthy
+      business-backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   frontend:
     build:
       context: ./frontend
       args:
-        VITE_API_BASE: http://localhost:8080
-        VITE_CHAT_API_BASE: http://localhost:8080
+        VITE_API_BASE: /api
+        VITE_CHAT_API_BASE: /api
     ports:
       - "5173:80"
     depends_on:
-      - gateway
+      business-backend:
+        condition: service_healthy
+      chat-orchestrator:
+        condition: service_healthy
 
 volumes:
+  postgres17_data:
   faiss_data:
   hf_cache:

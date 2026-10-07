@@ -2,7 +2,7 @@
 from langchain_core.tools import tool
 
 from services.memory_service import remember_fact as _remember_fact
-from database import get_db_session
+from services.memory_service import memory_session
 
 
 def build_memory_tools(owner_id: int) -> list:
@@ -31,7 +31,7 @@ def build_memory_tools(owner_id: int) -> list:
 
         The fact should be short, general, and written from the user's perspective.
         """
-        with get_db_session() as db:
+        with memory_session() as db:
             _remember_fact(db, owner_id, fact)
         return f"Remembered: {fact}"
 

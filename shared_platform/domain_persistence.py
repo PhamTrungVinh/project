@@ -10,12 +10,16 @@ from sqlalchemy.orm import sessionmaker
 from database import LOCAL_ENVIRONMENTS, get_database_url
 
 DOMAIN_DATABASE_ENV = {
+    "event": "EVENT_DATABASE_URL",
+    "identity": "IDENTITY_DATABASE_URL",
     "ticket": "TICKET_DATABASE_URL",
     "booking": "BOOKING_DATABASE_URL",
     "memory": "MEMORY_DATABASE_URL",
 }
 
 LOCAL_DOMAIN_DATABASE_URL = {
+    "event": "sqlite:///./events.db",
+    "identity": "sqlite:///./identity_service.db",
     "ticket": "sqlite:///./ticket_service.db",
     "booking": "sqlite:///./booking_service.db",
     "memory": "sqlite:///./memory_service.db",
@@ -38,7 +42,7 @@ def database_url_for(domain: str) -> str:
     raise RuntimeError(f"{environment_key} is required outside local development")
 
 
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=5)
 def session_factory_for(domain: str):
     """Return a domain-owned session factory selected by that domain's URL."""
     database_url = database_url_for(domain)

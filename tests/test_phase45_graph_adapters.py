@@ -11,7 +11,7 @@ def test_ticket_graph_create_uses_claim_authenticated_adapter(monkeypatch, db_se
 
     monkeypatch.setattr(ticket_tools, "TICKET_ADAPTER", "http")
     monkeypatch.setattr(ticket_tools, "domain_request_for_claims", remote)
-    monkeypatch.setattr(ticket_tools, "remember_episode", lambda *args: None)
+    monkeypatch.setattr(ticket_tools, "record_memory_episode", lambda *args: None)
     claims = AuthClaims(subject_id=test_user.id, email=test_user.email, full_name=test_user.full_name)
     create_ticket = ticket_tools.build_ticket_tools(test_user.id, "thread-1", "idem-1", claims)[0]
 
@@ -33,7 +33,7 @@ def test_booking_graph_create_uses_claim_authenticated_adapter(monkeypatch, db_s
 
     monkeypatch.setattr(booking_tools, "BOOKING_ADAPTER", "http")
     monkeypatch.setattr(booking_tools, "domain_request_for_claims", remote)
-    monkeypatch.setattr(booking_tools, "remember_episode", lambda *args: None)
+    monkeypatch.setattr(booking_tools, "record_memory_episode", lambda *args: None)
     claims = AuthClaims(subject_id=test_user.id, email=test_user.email, full_name=test_user.full_name)
     book_room = booking_tools.build_booking_tools(test_user.id, "thread-1", "idem-2", claims)[0]
 

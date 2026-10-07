@@ -23,4 +23,4 @@ ENV HF_HOME=/app/.cache/huggingface
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uv run alembic upgrade head && uv run uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "./.venv/bin/python -m scripts.migrate_service identity && ./.venv/bin/python -m scripts.migrate_service ticket && ./.venv/bin/python -m scripts.migrate_service booking && ./.venv/bin/python -m scripts.migrate_service event && exec ./.venv/bin/uvicorn business_backend.app:app --host 0.0.0.0 --port 8000"]

@@ -1,5 +1,10 @@
 # Run the split services locally
 
+For the planned consolidation into two backend processes, see the
+[phase 1 compatibility baseline](CONSOLIDATION_PHASE_1.md). The original
+deployment configuration is preserved in
+[`docker-compose.split-baseline.yml`](../docker-compose.split-baseline.yml).
+
 Each API runs in its own process with a separate SQLite file. Use the same
 `JWT_SECRET_KEY` in all processes. The gateway is the only frontend API base.
 Keep `.env` available for the existing AI provider keys.
@@ -12,15 +17,15 @@ Run from the repository root:
 docker compose up --build
 ```
 
-Compose starts the gateway, chat, identity, ticket, booking, memory, knowledge,
-event receiver, event worker, and frontend. The frontend is at
-`http://localhost:5173`; the gateway is at `http://localhost:8080`. Only these
-two ports are published. `GROQ_API` and `JWT_SECRET_KEY` must be set in `.env`
-or the shell. Compose supplies matching local defaults for the knowledge and
-event service tokens. It runs each service's migration before that service
+Compose now starts the multi-agent chat service, business backend, and frontend.
+See [phase 4](CONSOLIDATION_PHASE_4.md) for the current deployment and API routing.
+The frontend is at `http://localhost:5173`; the API is at
+`http://localhost:5173/api`. Only port 5173 is published.
+`GROQ_API` and `JWT_SECRET_KEY` must be set in `.env`
+or the shell. It runs each owned database's migration before its service
 starts. Service data lives under `local_data/<service>/`, which is ignored by
-Git. The event worker reads the ticket and booking database files to deliver
-their outboxes; it does not migrate those databases.
+Git. The business backend delivers ticket and booking outboxes to the event
+inbox in process.
 
 Compose starts with empty service databases. If you already have split local
 databases in the repository root, stop Compose before copying them into their
@@ -44,6 +49,9 @@ migration without changing data. An incomplete or mixed-service database is
 rejected with an error instead of being stamped.
 
 ## Separate local processes
+
+The commands below describe the original split layout retained for rollback.
+For the consolidated chat process, use the phase 2 guide above.
 
 Run commands from the repository root in separate terminals. Apply migrations
 first; standalone APIs no longer create tables on startup:

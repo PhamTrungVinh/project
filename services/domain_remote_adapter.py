@@ -1,6 +1,6 @@
 """HTTP implementations used when a Phase 4.5 domain flag is enabled."""
 
-from config import BOOKING_SERVICE_URL, MEMORY_SERVICE_URL, TICKET_SERVICE_URL
+from config import BOOKING_SERVICE_URL, MEMORY_SERVICE_URL, TICKET_SERVICE_URL, MEMORY_ADAPTER
 from models.user import User
 from shared_platform.auth_claims import AuthClaims
 from shared_platform.domain_adapter import token_for_claims, token_for_user
@@ -45,6 +45,12 @@ def memory_context(user: User, query: str) -> str:
     response = memory_request(user, "GET", "/v1/memory/context", query={"query": query})
     return str(response.get("context", ""))
 def record_memory_episode(user: User, thread_id: str, summary: str, outcome: str) -> None:
+    # Domain tools can remain HTTP clients while memory runs in this process.
+    if MEMORY_ADAPTER != "http":
+        from services.memory_service import memory_session, remember_episode
+        with memory_session() as db:
+            remember_episode(db, user.id, thread_id, summary, outcome)
+        return
     memory_request(
         user, "POST", "/v1/memory/episodes",
         {"thread_id": thread_id, "summary": summary, "outcome": outcome},
